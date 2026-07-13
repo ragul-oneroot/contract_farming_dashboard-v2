@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Phone, MapPin, Sprout, ShoppingCart, UserCog, Map as MapIcon, Camera } from "lucide-react";
+import { ArrowLeft, Phone, MapPin, Sprout, ShoppingCart, UserCog, Map as MapIcon, Camera, ClipboardCheck } from "lucide-react";
 import {
   api,
   Crop,
@@ -132,6 +132,12 @@ export default function FarmerDetailPage() {
 
   const hasLoc = farmer.location?.latitude != null && farmer.location?.longitude != null;
   const geofence = farmer.geofence ?? [];
+
+  // Agronomist verifications across all crops (newest first) — proof the
+  // agronomist checked whether the farmer did each day's task.
+  const verifications = crops
+    .flatMap((c) => (c.verifications ?? []).map((v) => ({ ...v, crop: c.name })))
+    .sort((a, b) => new Date(b.verifiedAt).getTime() - new Date(a.verifiedAt).getTime());
 
   // Every product-application photo the farmer uploaded (newest first).
   const productPhotos = crops
@@ -304,6 +310,56 @@ export default function FarmerDetailPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+      </section>
+
+      {/* Agronomist verifications (did the farmer do each day's task?) */}
+      <section>
+        <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+          <ClipboardCheck size={18} className="text-green-600" /> Agronomist verifications ({verifications.length})
+        </h2>
+        {verifications.length === 0 ? (
+          <p className="text-sm text-zinc-500">
+            No verifications yet. They appear when the agronomist checks a day&apos;s task in the app and marks it
+            done or not done.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {verifications.map((v, i) => (
+              <div
+                key={i}
+                className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                {v.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={v.imageUrl} alt="Verification proof" className="h-16 w-16 shrink-0 rounded-md object-cover" />
+                ) : (
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-zinc-100 text-zinc-400 dark:bg-zinc-900">
+                    <Camera size={20} />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="truncate font-medium">{v.operation || `Day ${v.day}`}</div>
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
+                        v.status === "done"
+                          ? "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300"
+                          : "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+                      }`}
+                    >
+                      {v.status === "done" ? "Done" : "Not done"}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-zinc-500">
+                    {v.crop} · Day {v.day}
+                    {v.dayEnd && v.dayEnd !== v.day ? `–${v.dayEnd}` : ""} · {fmtDate(v.verifiedAt)}
+                  </div>
+                  {v.note ? <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{v.note}</div> : null}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </section>

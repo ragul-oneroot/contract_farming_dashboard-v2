@@ -17,8 +17,8 @@ function fmtDate(s: string) {
 
 export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const label = role === "farmer" ? "farmers" : "agronomists";
-  const showDetail = role === "farmer"; // only farmers have a detail page
-  const colCount = showDetail ? 5 : 4;
+  const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
+  const colCount = showDetail ? 6 : 4;
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +92,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               <th className="px-4 py-3 font-semibold">Registered at</th>
               <th className="px-4 py-3 font-semibold">Mobile Number</th>
               <th className="px-4 py-3 font-semibold">Location</th>
+              {showDetail && <th className="px-4 py-3 font-semibold">Agronomist</th>}
               {showDetail && <th className="px-4 py-3 font-semibold text-right">Details</th>}
             </tr>
           </thead>
@@ -128,6 +129,15 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                       ? `${p.location.latitude.toFixed(3)}, ${p.location.longitude.toFixed(3)}`
                       : "—"}
                   </td>
+                  {showDetail && (
+                    <td className="px-4 py-3">
+                      {p.agronomist ? (
+                        p.agronomist.name
+                      ) : (
+                        <span className="text-zinc-400">Unassigned</span>
+                      )}
+                    </td>
+                  )}
                   {showDetail && (
                     <td className="px-4 py-2 text-right">
                       <Link
