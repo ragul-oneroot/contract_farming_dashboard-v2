@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { LayoutDashboard, Users, UserCog, Sprout, Package, LogOut, ChevronLeft, Leaf } from "lucide-react";
+import { LayoutDashboard, Users, UserCog, Sprout, Package, Phone, LogOut, ChevronLeft, Leaf } from "lucide-react";
 import { useAuth } from "../lib/auth";
 
 const NAV = [
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/agronomists", label: "Agronomists", icon: UserCog },
   { href: "/crops", label: "Crops", icon: Sprout },
   { href: "/products", label: "Products", icon: Package },
+  { href: "/calls", label: "Calls", icon: Phone },
 ];
 
 const TITLES: Record<string, string> = {
@@ -20,6 +21,7 @@ const TITLES: Record<string, string> = {
   "/agronomists": "Agronomists",
   "/crops": "Crops & Package of Practices",
   "/products": "Products",
+  "/calls": "Call Logs & Recordings",
 };
 
 export function Shell({ children }: { children: React.ReactNode }) {

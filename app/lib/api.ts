@@ -62,6 +62,17 @@ export type CropProductProgress = {
   completedAt: string;
 };
 
+export type CropVerification = {
+  day: number;
+  dayEnd: number | null;
+  operation: string;
+  status: "done" | "not_done";
+  imageUrl: string;
+  note: string;
+  agronomist: string | null;
+  verifiedAt: string;
+};
+
 export type Crop = {
   _id: string;
   user: string;
@@ -73,6 +84,7 @@ export type Crop = {
   notes: string;
   progress: CropProgress[];
   productProgress?: CropProductProgress[];
+  verifications?: CropVerification[];
   createdAt: string;
 };
 
@@ -147,6 +159,22 @@ async function form<T>(path: string, method: string, body: FormData): Promise<T>
   return data as T;
 }
 
+export type CallLog = {
+  _id: string;
+  agronomist: { _id: string; name: string; mobile: string } | null;
+  agronomistMobile?: string;
+  farmer: string | null;
+  farmerName: string;
+  farmerMobile: string;
+  provider?: string;
+  callUUID?: string;
+  status?: string;
+  duration?: number;
+  recordingUrl?: string;
+  calledAt: string;
+  createdAt: string;
+};
+
 export const api = {
   // Admin auth
   register: (name: string, mobile: string, password: string) =>
@@ -202,6 +230,9 @@ export const api = {
   updateProduct: (id: string, data: FormData) => form<Product>(`/api/products/${id}`, "PUT", data),
   deleteProduct: (id: string) =>
     json<{ message: string }>(`/api/products/${id}`, { method: "DELETE" }),
+
+  // Call logs (agronomist -> farmer, recorded via Plivo)
+  listCallLogs: () => json<CallLog[]>("/api/call-logs"),
 
   // Crop catalog (crops a farmer can pick from in the app)
   listCropCatalog: () => json<CatalogCrop[]>("/api/crop-catalog"),
