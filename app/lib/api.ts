@@ -65,6 +65,7 @@ export type CropProductProgress = {
 export type CropVerification = {
   day: number;
   dayEnd: number | null;
+  kind?: "operation" | "product";
   operation: string;
   status: "done" | "not_done";
   imageUrl: string;
@@ -175,6 +176,19 @@ export type CallLog = {
   createdAt: string;
 };
 
+export type DailyReport = {
+  _id: string;
+  user: { _id: string; name: string; mobile: string } | null;
+  userName: string;
+  role: string;
+  dailyReport: string;
+  dailyExpenses: string;
+  expectedExpensesTomorrow: string;
+  planOfActionTomorrow: string;
+  date: string;
+  createdAt: string;
+};
+
 export const api = {
   // Admin auth
   register: (name: string, mobile: string, password: string) =>
@@ -233,6 +247,9 @@ export const api = {
 
   // Call logs (agronomist -> farmer, recorded via Plivo)
   listCallLogs: () => json<CallLog[]>("/api/call-logs"),
+
+  // Daily reports submitted by field agents
+  listDailyReports: () => json<DailyReport[]>("/api/daily-reports"),
 
   // Crop catalog (crops a farmer can pick from in the app)
   listCropCatalog: () => json<CatalogCrop[]>("/api/crop-catalog"),

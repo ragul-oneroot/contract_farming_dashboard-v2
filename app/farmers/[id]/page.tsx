@@ -341,7 +341,12 @@ export default function FarmerDetailPage() {
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="truncate font-medium">{v.operation || `Day ${v.day}`}</div>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-medium">{v.operation || `Day ${v.day}`}</span>
+                      <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium capitalize text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                        {v.kind === "product" ? "Product" : "Operation"}
+                      </span>
+                    </div>
                     <span
                       className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
                         v.status === "done"
