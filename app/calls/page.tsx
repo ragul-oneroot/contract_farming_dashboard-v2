@@ -106,8 +106,12 @@ export default function CallsPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    {l.recordingUrl || l.status === "completed" ? (
-                      // Streamed through the backend proxy (Plivo media needs auth).
+                    {l.recordingUrl ? (
+                      // Plivo recording URLs are directly playable.
+                      // eslint-disable-next-line jsx-a11y/media-has-caption
+                      <audio controls preload="none" src={l.recordingUrl} className="h-9 w-56 max-w-full" />
+                    ) : l.status === "completed" ? (
+                      // No URL captured yet — proxy resolves + streams it on demand.
                       // eslint-disable-next-line jsx-a11y/media-has-caption
                       <audio
                         controls
