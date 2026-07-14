@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ClipboardList, FileText, Wallet, CalendarClock, IndianRupee } from "lucide-react";
+import { ClipboardList } from "lucide-react";
 import { api, DailyReport } from "../lib/api";
 
 function fmtDate(s: string) {
@@ -13,13 +13,6 @@ function fmtDate(s: string) {
     minute: "2-digit",
   });
 }
-
-const SECTIONS: { key: keyof DailyReport; label: string; icon: React.ElementType }[] = [
-  { key: "dailyReport", label: "Daily Report", icon: FileText },
-  { key: "dailyExpenses", label: "Today's Expenses", icon: IndianRupee },
-  { key: "expectedExpensesTomorrow", label: "Expected Expenses (Tomorrow)", icon: Wallet },
-  { key: "planOfActionTomorrow", label: "Plan of Action (Tomorrow)", icon: CalendarClock },
-];
 
 export default function ReportsPage() {
   const [reports, setReports] = useState<DailyReport[]>([]);
@@ -49,45 +42,40 @@ export default function ReportsPage() {
           No reports yet. They appear when a field agent submits their daily report in the app.
         </p>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {reports.map((r) => {
-            const name = r.user?.name || r.userName || "Field agent";
-            return (
-              <div
-                key={r._id}
-                className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950"
-              >
-                <div className="mb-3 flex items-center justify-between gap-2 border-b border-zinc-100 pb-2 dark:border-zinc-800">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-green-600 text-sm font-semibold text-white">
-                      {name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium">{name}</div>
+        <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+          <table className="w-full min-w-[960px] text-sm">
+            <thead>
+              <tr className="border-b border-zinc-200 text-left text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+                <th className="px-4 py-3 font-medium">Field Agent</th>
+                <th className="px-4 py-3 font-medium">Date</th>
+                <th className="px-4 py-3 font-medium">Daily Report</th>
+                <th className="px-4 py-3 font-medium">Today&apos;s Expenses</th>
+                <th className="px-4 py-3 font-medium">Expected (Tomorrow)</th>
+                <th className="px-4 py-3 font-medium">Plan (Tomorrow)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reports.map((r) => {
+                const name = r.user?.name || r.userName || "Field agent";
+                const cell = (v: string) => (
+                  <span className={v ? "" : "italic text-zinc-400"}>{v || "—"}</span>
+                );
+                return (
+                  <tr key={r._id} className="border-b border-zinc-100 last:border-0 align-top dark:border-zinc-900">
+                    <td className="px-4 py-3">
+                      <div className="font-medium">{name}</div>
                       {r.user?.mobile ? <div className="text-xs text-zinc-500">{r.user.mobile}</div> : null}
-                    </div>
-                  </div>
-                  <span className="text-xs text-zinc-400">{fmtDate(r.date)}</span>
-                </div>
-
-                <div className="space-y-3">
-                  {SECTIONS.map(({ key, label, icon: Icon }) => {
-                    const value = (r[key] as string) || "";
-                    return (
-                      <div key={key}>
-                        <div className="mb-0.5 flex items-center gap-1.5 text-xs font-medium text-zinc-500">
-                          <Icon size={13} className="text-green-600" /> {label}
-                        </div>
-                        <p className={`text-sm ${value ? "" : "italic text-zinc-400"}`}>
-                          {value || "—"}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-zinc-500">{fmtDate(r.date)}</td>
+                    <td className="px-4 py-3"><div className="max-w-[240px]">{cell(r.dailyReport)}</div></td>
+                    <td className="px-4 py-3"><div className="max-w-[150px]">{cell(r.dailyExpenses)}</div></td>
+                    <td className="px-4 py-3"><div className="max-w-[150px]">{cell(r.expectedExpensesTomorrow)}</div></td>
+                    <td className="px-4 py-3"><div className="max-w-[240px]">{cell(r.planOfActionTomorrow)}</div></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

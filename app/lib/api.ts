@@ -189,6 +189,19 @@ export type DailyReport = {
   createdAt: string;
 };
 
+export type Visit = {
+  _id: string;
+  agronomist: { _id: string; name: string; mobile: string } | null;
+  farmer: { _id: string; name: string; mobile: string } | null;
+  farmerName: string;
+  farmPhotoUrl: string;
+  farmerPhotoUrl: string;
+  location: { latitude: number | null; longitude: number | null };
+  notes: string;
+  visitedAt: string;
+  createdAt: string;
+};
+
 export const api = {
   // Admin auth
   register: (name: string, mobile: string, password: string) =>
@@ -250,6 +263,9 @@ export const api = {
 
   // Daily reports submitted by field agents
   listDailyReports: () => json<DailyReport[]>("/api/daily-reports"),
+
+  // Farm visits logged by agronomists
+  listVisits: () => json<Visit[]>("/api/visits"),
 
   // Crop catalog (crops a farmer can pick from in the app)
   listCropCatalog: () => json<CatalogCrop[]>("/api/crop-catalog"),

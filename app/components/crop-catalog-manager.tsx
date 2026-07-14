@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, X, Leaf, ClipboardList } from "lucide-react";
-import { api, CatalogCrop } from "../lib/api";
+import { api, CatalogCrop, Practice } from "../lib/api";
 
 type FormState = {
   id: string | null;
@@ -26,6 +26,7 @@ const emptyForm = (): FormState => ({
 export function CropCatalogManager() {
   const router = useRouter();
   const [crops, setCrops] = useState<CatalogCrop[]>([]);
+  const [practices, setPractices] = useState<Record<string, Practice>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -34,7 +35,16 @@ export function CropCatalogManager() {
 
   async function load() {
     try {
-      setCrops(await api.listCropCatalog());
+      const [cat, prac] = await Promise.all([
+        api.listCropCatalog(),
+        api.listPractices().catch(() => [] as Practice[]),
+      ]);
+      setCrops(cat);
+      const map: Record<string, Practice> = {};
+      prac.forEach((p) => {
+        if (p.crop) map[p.crop.toLowerCase()] = p;
+      });
+      setPractices(map);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load crops");
     } finally {
@@ -141,67 +151,98 @@ export function CropCatalogManager() {
           No crops yet. Click “Add Crop” to create the first one.
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {crops.map((c) => (
-            <div
-              key={c._id}
-              onClick={() => router.push(`/crops/${encodeURIComponent(c.name)}`)}
-              className="group cursor-pointer overflow-hidden rounded-xl border border-zinc-200 bg-white transition-colors hover:border-green-400 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-green-600"
-            >
-              {c.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={c.imageUrl} alt={c.name} className="h-28 w-full object-cover" />
-              ) : (
-                <div className="flex h-28 w-full items-center justify-center bg-green-50 dark:bg-green-950/30">
-                  <Leaf size={28} className="text-green-600" />
-                </div>
-              )}
-              <div className="p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-medium">{c.name}</span>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openEdit(c);
-                      }}
-                      className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                      title="Edit crop"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        remove(c);
-                      }}
-                      className="rounded p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
-                      title="Delete crop"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {c.varieties.length === 0 ? (
-                    <span className="text-xs text-zinc-400">No varieties</span>
-                  ) : (
-                    c.varieties.map((v) => (
-                      <span
-                        key={v}
-                        className="rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-700 dark:bg-green-950/40 dark:text-green-300"
-                      >
-                        {v}
-                      </span>
-                    ))
-                  )}
-                </div>
-                <div className="mt-2 flex items-center gap-1 text-xs font-medium text-green-600 opacity-0 transition-opacity group-hover:opacity-100">
-                  <ClipboardList size={13} /> Edit Package of Practices →
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead>
+              <tr className="border-b border-zinc-200 text-left text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+                <th className="px-4 py-3 font-medium">Crop</th>
+                <th className="px-4 py-3 font-medium">Varieties</th>
+                <th className="px-4 py-3 font-medium">Package of Practices</th>
+                <th className="px-4 py-3 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {crops.map((c) => {
+                const pop = practices[c.name.toLowerCase()];
+                const openPop = () => router.push(`/crops/${encodeURIComponent(c.name)}`);
+                return (
+                  <tr key={c._id} className="border-b border-zinc-100 last:border-0 align-middle dark:border-zinc-900">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        {c.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={c.imageUrl} alt={c.name} className="h-11 w-11 shrink-0 rounded-md object-cover" />
+                        ) : (
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-green-50 dark:bg-green-950/30">
+                            <Leaf size={20} className="text-green-600" />
+                          </div>
+                        )}
+                        <button onClick={openPop} className="font-medium hover:text-green-600">
+                          {c.name}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {c.varieties.length === 0 ? (
+                        <span className="text-xs text-zinc-400">No varieties</span>
+                      ) : (
+                        <div className="flex max-w-[240px] flex-wrap gap-1">
+                          {c.varieties.map((v) => (
+                            <span
+                              key={v}
+                              className="rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-700 dark:bg-green-950/40 dark:text-green-300"
+                            >
+                              {v}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {pop && pop.steps.length > 0 ? (
+                        <div>
+                          <div className="font-medium">
+                            {pop.durationDays}-day cycle · {pop.steps.length} steps
+                          </div>
+                          <button
+                            onClick={openPop}
+                            className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-green-600 hover:underline"
+                          >
+                            <ClipboardList size={12} /> View / edit schedule
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={openPop}
+                          className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300"
+                        >
+                          <Plus size={12} /> Add schedule
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1">
+                        <button
+                          onClick={() => openEdit(c)}
+                          className="rounded p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                          title="Edit crop"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          onClick={() => remove(c)}
+                          className="rounded p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
+                          title="Delete crop"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
