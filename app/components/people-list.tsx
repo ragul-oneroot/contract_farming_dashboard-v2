@@ -7,6 +7,16 @@ import { api, Person } from "../lib/api";
 
 const PAGE_SIZE = 12;
 
+// District/Taluk/Village come from the farm boundary, so they're blank until the farmer draws
+// one. The tooltip says so — otherwise an empty cell reads like a bug.
+function NoFarm() {
+  return (
+    <span className="text-zinc-400" title="No farm boundary drawn yet, or the location could not be named">
+      —
+    </span>
+  );
+}
+
 function fmtDate(s: string) {
   return new Date(s).toLocaleDateString(undefined, {
     day: "2-digit",
@@ -18,7 +28,8 @@ function fmtDate(s: string) {
 export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const label = role === "farmer" ? "farmers" : "agronomists";
   const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
-  const colCount = showDetail ? 6 : 4;
+  // Farmers also get District/Taluk/Village, derived from their farm boundary.
+  const colCount = showDetail ? 9 : 4;
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +59,10 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return people;
-    return people.filter(
-      (p) => p.name.toLowerCase().includes(q) || p.mobile.toLowerCase().includes(q)
+    // Place names are searchable too, so "Anekal" finds every farmer in that taluk.
+    return people.filter((p) =>
+      [p.name, p.mobile, p.farmAddress?.district, p.farmAddress?.taluk, p.farmAddress?.village]
+        .some((f) => f?.toLowerCase().includes(q))
     );
   }, [people, query]);
 
@@ -92,6 +105,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               <th className="px-4 py-3 font-semibold">Registered at</th>
               <th className="px-4 py-3 font-semibold">Mobile Number</th>
               <th className="px-4 py-3 font-semibold">Location</th>
+              {showDetail && <th className="px-4 py-3 font-semibold">District</th>}
+              {showDetail && <th className="px-4 py-3 font-semibold">Taluk</th>}
+              {showDetail && <th className="px-4 py-3 font-semibold">Village</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Agronomist</th>}
               {showDetail && <th className="px-4 py-3 font-semibold text-right">Details</th>}
             </tr>
@@ -129,6 +145,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                       ? `${p.location.latitude.toFixed(3)}, ${p.location.longitude.toFixed(3)}`
                       : "—"}
                   </td>
+                  {showDetail && <td className="px-4 py-3">{p.farmAddress?.district || <NoFarm />}</td>}
+                  {showDetail && <td className="px-4 py-3">{p.farmAddress?.taluk || <NoFarm />}</td>}
+                  {showDetail && <td className="px-4 py-3">{p.farmAddress?.village || <NoFarm />}</td>}
                   {showDetail && (
                     <td className="px-4 py-3">
                       {p.agronomist ? (

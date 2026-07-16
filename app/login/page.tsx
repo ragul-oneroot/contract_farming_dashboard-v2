@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { Leaf } from "lucide-react";
 import { useAuth } from "../lib/auth";
 
@@ -72,10 +71,7 @@ export default function LoginPage() {
         </button>
 
         <p className="mt-4 text-center text-sm text-zinc-500">
-          Don&apos;t have an account?{" "}
-          <Link href="/signup" className="font-medium text-green-700 hover:underline dark:text-green-400">
-            Sign up
-          </Link>
+          Need access? Ask an existing admin to add you from the Account tab.
         </p>
       </form>
     </div>

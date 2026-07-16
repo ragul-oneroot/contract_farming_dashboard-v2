@@ -6,7 +6,6 @@ import { api, Admin, getToken, setToken, clearToken } from "./api";
 type AuthValue = {
   admin: Admin | null;
   loading: boolean;
-  register: (name: string, mobile: string, password: string) => Promise<void>;
   login: (mobile: string, password: string) => Promise<void>;
   logout: () => void;
 };
@@ -35,12 +34,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  async function register(name: string, mobile: string, password: string) {
-    const { token, admin } = await api.register(name, mobile, password);
-    setToken(token);
-    setAdmin(admin);
-  }
-
   async function login(mobile: string, password: string) {
     const { token, admin } = await api.login(mobile, password);
     setToken(token);
@@ -53,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ admin, loading, register, login, logout }}>
+    <AuthContext.Provider value={{ admin, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

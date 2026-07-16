@@ -10,7 +10,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const { admin, loading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const isPublic = pathname === "/login" || pathname === "/signup";
+  // Login is the only public page — there is no sign-up. Admins are created from /account.
+  const isPublic = pathname === "/login";
 
   useEffect(() => {
     if (loading) return;
@@ -21,7 +22,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   if (loading) {
     return <div className="p-10 text-center text-zinc-500">Loading…</div>;
   }
-  // Login & signup screens render bare (no sidebar/header).
+  // The login screen renders bare (no sidebar/header).
   if (isPublic) return admin ? null : <>{children}</>;
   // Avoid flashing protected content while redirecting.
   if (!admin) return null;

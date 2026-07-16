@@ -1,11 +1,22 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000";
 
+// Where the farm is, reverse-geocoded from the centre of the farmer's boundary by the backend.
+// Empty strings mean "no boundary drawn yet" or "geocoder couldn't place it".
+export type FarmAddress = {
+  village?: string;
+  taluk?: string;
+  district?: string;
+  state?: string;
+  geocodedAt?: string | null;
+};
+
 export type Person = {
   _id: string;
   name: string;
   mobile: string;
   location: { latitude: number | null; longitude: number | null };
   geofence?: { latitude: number; longitude: number }[]; // farm-boundary polygon
+  farmAddress?: FarmAddress;
   agronomist?: { _id: string; name: string; mobile: string } | null;
   createdAt: string;
 };
@@ -39,7 +50,7 @@ export type Product = {
   createdAt: string;
 };
 
-export type Admin = { _id: string; name: string; mobile: string };
+export type Admin = { _id: string; name: string; mobile: string; createdAt?: string };
 
 export type CatalogCrop = {
   _id: string;
@@ -203,18 +214,27 @@ export type Visit = {
 };
 
 export const api = {
-  // Admin auth
-  register: (name: string, mobile: string, password: string) =>
-    json<{ token: string; admin: Admin }>("/api/admin/register", {
-      method: "POST",
-      body: JSON.stringify({ name, mobile, password }),
-    }),
+  // Admin auth. There is no register/sign-up: admins are created from the Account tab.
   login: (mobile: string, password: string) =>
     json<{ token: string; admin: Admin }>("/api/admin/login", {
       method: "POST",
       body: JSON.stringify({ mobile, password }),
     }),
   me: () => json<{ admin: Admin }>("/api/admin/me"),
+
+  // Admin management (Account tab)
+  listAdmins: () => json<Admin[]>("/api/admin"),
+  createAdmin: (name: string, mobile: string, password: string) =>
+    json<{ admin: Admin }>("/api/admin", {
+      method: "POST",
+      body: JSON.stringify({ name, mobile, password }),
+    }),
+  deleteAdmin: (id: string) => json<{ _id: string }>(`/api/admin/${id}`, { method: "DELETE" }),
+  resetAdminPassword: (id: string, password: string) =>
+    json<{ admin: Admin }>(`/api/admin/${id}/password`, {
+      method: "PATCH",
+      body: JSON.stringify({ password }),
+    }),
 
   // Users
   listFarmers: () => json<Person[]>("/api/users/farmers"),

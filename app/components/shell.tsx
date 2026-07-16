@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { LayoutDashboard, Users, UserCog, Sprout, Package, Phone, ClipboardList, MapPin, LogOut, ChevronLeft, Leaf } from "lucide-react";
+import { LayoutDashboard, Users, UserCog, Sprout, Package, Phone, ClipboardList, MapPin, LogOut, ChevronLeft, Leaf, ShieldCheck } from "lucide-react";
 import { useAuth } from "../lib/auth";
 
 const NAV = [
@@ -15,6 +15,7 @@ const NAV = [
   { href: "/calls", label: "Calls", icon: Phone },
   { href: "/visits", label: "Farm Visits", icon: MapPin },
   { href: "/reports", label: "Daily Reports", icon: ClipboardList },
+  { href: "/account", label: "Account", icon: ShieldCheck },
 ];
 
 const TITLES: Record<string, string> = {
@@ -26,6 +27,7 @@ const TITLES: Record<string, string> = {
   "/calls": "Call Logs & Recordings",
   "/visits": "Farm Visits",
   "/reports": "Daily Reports",
+  "/account": "Account & Dashboard Access",
 };
 
 export function Shell({ children }: { children: React.ReactNode }) {
