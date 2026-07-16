@@ -5,7 +5,7 @@ import { Plus, Trash2, Save, GripVertical, Package, X } from "lucide-react";
 import { api, Practice, PopStep, Product } from "../lib/api";
 
 const emptyStep = (): PopStep => ({
-  day: [1, 1],
+  day: [0, 0],
   category: "monitoring",
   operation: "",
   details: "",
@@ -241,14 +241,18 @@ export function PracticesManager({ crop }: { crop?: string } = {}) {
                         <label className="text-xs text-zinc-500">Day</label>
                         <input
                           type="number"
-                          value={s.day[0]}
+                          min={0}
+                          placeholder="From"
+                          value={s.day[0] || ""}
                           onChange={(e) => updateDay(i, 0, Number(e.target.value))}
                           className="w-20 rounded-lg border border-zinc-300 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
                         />
                         <span className="text-zinc-400">–</span>
                         <input
                           type="number"
-                          value={s.day[1]}
+                          min={0}
+                          placeholder="To"
+                          value={s.day[1] || ""}
                           onChange={(e) => updateDay(i, 1, Number(e.target.value))}
                           className="w-20 rounded-lg border border-zinc-300 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
                         />
