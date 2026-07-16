@@ -207,7 +207,9 @@ export function PracticesManager({ crop }: { crop?: string } = {}) {
                 <span className="mb-1 block text-zinc-500">Cycle duration (days)</span>
                 <input
                   type="number"
-                  value={durationDays}
+                  min={0}
+                  placeholder="e.g. 230"
+                  value={durationDays || ""}
                   onChange={(e) => setDurationDays(Number(e.target.value))}
                   className="w-32 rounded-lg border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700"
                 />
