@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Phone, MapPin, Sprout, ShoppingCart, UserCog, Map as MapIcon, Camera, ClipboardCheck } from "lucide-react";
+import { ArrowLeft, Phone, MapPin, Sprout, ShoppingCart, UserCog, Map as MapIcon, Camera, ClipboardCheck, Pencil, Plus, Trash2, X } from "lucide-react";
 import {
   api,
+  CatalogCrop,
   Crop,
   Order,
   OrderStatus,
@@ -82,6 +83,17 @@ export default function FarmerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Edit farmer identity (admin only).
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", mobile: "" });
+
+  // Crops are added from the same Edit modal. A farmer can have several.
+  const [catalog, setCatalog] = useState<CatalogCrop[]>([]);
+  const [cropForm, setCropForm] = useState({ name: "", variety: "", dop: "", area: "" });
+
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
   useEffect(() => {
     (async () => {
       try {
@@ -92,6 +104,7 @@ export default function FarmerDetailPage() {
           api.listAgronomists().catch(() => []),
           api.listProducts().catch(() => []),
         ]);
+        api.listCropCatalog().then(setCatalog).catch(() => {});
         setFarmer(user);
         setCrops(cropList);
         setOrders(orderList);
@@ -125,6 +138,80 @@ export default function FarmerDetailPage() {
       setSavingAgro(false);
     }
   }
+
+  // Existing crops' planting dates, keyed by crop id, as yyyy-mm-dd for <input type="date">.
+  const [cropDops, setCropDops] = useState<Record<string, string>>({});
+
+  const toInputDate = (s: string | null) => (s ? new Date(s).toISOString().slice(0, 10) : "");
+
+  function openEdit() {
+    if (!farmer) return;
+    setEditForm({ name: farmer.name, mobile: farmer.mobile });
+    setCropForm({ name: "", variety: "", dop: "", area: "" });
+    setCropDops(Object.fromEntries(crops.map((c) => [c._id, toInputDate(c.dop)])));
+    setFormError(null);
+    setEditing(true);
+  }
+
+  // Saves identity changes and, if a crop was picked, adds it in the same step.
+  async function submitEdit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setFormError(null);
+    try {
+      if (farmer && (editForm.name !== farmer.name || editForm.mobile !== farmer.mobile)) {
+        const updated = await api.updateFarmer(id, editForm);
+        setFarmer((f) => (f ? { ...f, name: updated.name, mobile: updated.mobile } : f));
+      }
+
+      // Planting dates changed on existing crops.
+      const changed = crops.filter((c) => (cropDops[c._id] ?? "") !== toInputDate(c.dop));
+      if (changed.length) {
+        const updated = await Promise.all(
+          changed.map((c) =>
+            api.updateCrop(c._id, { dop: cropDops[c._id] ? cropDops[c._id] : null })
+          )
+        );
+        const byId = new Map(updated.map((u) => [u._id, u]));
+        setCrops((cs) => cs.map((c) => byId.get(c._id) ?? c));
+      }
+
+      if (cropForm.name) {
+        const created = await api.addUserCrop(id, {
+          name: cropForm.name,
+          variety: cropForm.variety || undefined,
+          dop: cropForm.dop || null,
+          area: cropForm.area ? Number(cropForm.area) : null,
+        });
+        setCrops((cs) => [created, ...cs]);
+        // Pull in this crop's Package of Practices if it's one we haven't seen.
+        const key = created.name.toLowerCase();
+        if (!pops[key]) {
+          const pop = await api.getPractices(created.name).catch(() => null);
+          if (pop) setPops((p) => ({ ...p, [key]: pop }));
+        }
+      }
+
+      setEditing(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeCrop(cropId: string, cropName: string) {
+    if (!confirm(`Remove "${cropName}" from this farmer? This cannot be undone.`)) return;
+    try {
+      await api.deleteCrop(cropId);
+      setCrops((cs) => cs.filter((c) => c._id !== cropId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove crop");
+    }
+  }
+
+  // Varieties depend on which catalog crop is selected.
+  const varieties = catalog.find((c) => c.name === cropForm.name)?.varieties ?? [];
 
   if (loading) return <p className="text-zinc-500">Loading…</p>;
   if (error) return <p className="text-red-600">{error}</p>;
@@ -174,6 +261,12 @@ export default function FarmerDetailPage() {
             <span>Registered {fmtDate(farmer.createdAt)}</span>
           </div>
         </div>
+        <button
+          onClick={openEdit}
+          className="flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          <Pencil size={15} /> Edit details
+        </button>
       </div>
 
       {/* Agronomist assignment */}
@@ -230,11 +323,21 @@ export default function FarmerDetailPage() {
 
       {/* Crops + POP stage */}
       <section>
-        <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-          <Sprout size={18} className="text-green-600" /> Crops ({crops.length})
-        </h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <Sprout size={18} className="text-green-600" /> Crops ({crops.length})
+          </h2>
+          <button
+            onClick={openEdit}
+            className="flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
+          >
+            <Plus size={15} /> Add crop
+          </button>
+        </div>
         {crops.length === 0 ? (
-          <p className="text-sm text-zinc-500">This farmer hasn&apos;t added any crops yet.</p>
+          <p className="text-sm text-zinc-500">
+            This farmer hasn&apos;t added any crops yet. Use <strong>Add crop</strong> to add one.
+          </p>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {crops.map((crop) => {
@@ -252,7 +355,16 @@ export default function FarmerDetailPage() {
                       {crop.name}
                       {crop.variety ? <span className="text-zinc-400"> · {crop.variety}</span> : null}
                     </div>
-                    <span className="text-xs text-zinc-400">Planted {fmtDate(crop.dop)}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-400">Planted {fmtDate(crop.dop)}</span>
+                      <button
+                        onClick={() => removeCrop(crop._id, crop.name)}
+                        title="Remove this crop"
+                        className="rounded p-1 text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Progress bar */}
@@ -442,6 +554,179 @@ export default function FarmerDetailPage() {
           Note: the in-app cart lives on the farmer&apos;s device — only placed orders appear here.
         </p>
       </section>
+
+      {/* Edit farmer details */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <form
+            onSubmit={submitEdit}
+            className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Edit farmer details</h2>
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="rounded-lg p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <label className="mb-1 block text-sm text-zinc-500">Name</label>
+            <input
+              value={editForm.name}
+              onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+              required
+              autoFocus
+              className="mb-3 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+            />
+
+            <label className="mb-1 block text-sm text-zinc-500">Mobile number</label>
+            <input
+              value={editForm.mobile}
+              onChange={(e) => setEditForm((f) => ({ ...f, mobile: e.target.value }))}
+              required
+              inputMode="numeric"
+              className="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+            />
+            <p className="mt-1 text-xs text-amber-600">
+              The mobile number is how this farmer signs into the app — changing it changes their
+              login.
+            </p>
+
+            {/* Planting dates on crops this farmer already has. */}
+            {crops.length > 0 && (
+              <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                <p className="mb-1 text-sm font-medium">Planting dates (D.O.P)</p>
+                <p className="mb-2 text-xs text-zinc-500">
+                  The Package of Practices schedule is counted from this date — a crop with no
+                  date has no schedule.
+                </p>
+                <div className="space-y-2">
+                  {crops.map((c) => (
+                    <div key={c._id} className="flex items-center gap-3">
+                      <div className="min-w-0 flex-1 truncate text-sm">
+                        {c.name}
+                        {c.variety ? <span className="text-zinc-400"> · {c.variety}</span> : null}
+                        {!c.dop && !cropDops[c._id] && (
+                          <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                            not set
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="date"
+                        value={cropDops[c._id] ?? ""}
+                        onChange={(e) =>
+                          setCropDops((d) => ({ ...d, [c._id]: e.target.value }))
+                        }
+                        className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Add a crop in the same step. A farmer can have several. */}
+            <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+              <p className="mb-2 text-sm font-medium">
+                Add a crop <span className="font-normal text-zinc-500">(optional)</span>
+              </p>
+
+              <label className="mb-1 block text-sm text-zinc-500">Crop</label>
+              <select
+                value={cropForm.name}
+                onChange={(e) => setCropForm((f) => ({ ...f, name: e.target.value, variety: "" }))}
+                className="mb-3 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+              >
+                <option value="">— Don&apos;t add a crop —</option>
+                {catalog.map((c) => (
+                  <option key={c._id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+
+              {cropForm.name && (
+                <>
+                  <label className="mb-1 block text-sm text-zinc-500">Variety</label>
+                  {varieties.length > 0 ? (
+                    <select
+                      value={cropForm.variety}
+                      onChange={(e) => setCropForm((f) => ({ ...f, variety: e.target.value }))}
+                      className="mb-3 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+                    >
+                      <option value="">— Any —</option>
+                      {varieties.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={cropForm.variety}
+                      onChange={(e) => setCropForm((f) => ({ ...f, variety: e.target.value }))}
+                      placeholder="Variety name"
+                      className="mb-3 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+                    />
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-sm text-zinc-500">
+                        Date of planting <span className="text-zinc-400">— optional</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={cropForm.dop}
+                        onChange={(e) => setCropForm((f) => ({ ...f, dop: e.target.value }))}
+                        className="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm text-zinc-500">Area (acres)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        placeholder="e.g. 2.5"
+                        value={cropForm.area}
+                        onChange={(e) => setCropForm((f) => ({ ...f, area: e.target.value }))}
+                        className="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+                      />
+                    </div>
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    The Package of Practices schedule is counted from the planting date.
+                  </p>
+                </>
+              )}
+            </div>
+
+            {formError && <p className="mt-3 text-sm text-red-600">{formError}</p>}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
+              >
+                {saving ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

@@ -19,7 +19,21 @@ export type Person = {
   farmAddress?: FarmAddress;
   agronomist?: { _id: string; name: string; mobile: string } | null;
   createdAt: string;
+  /** Corners in the farm boundary; 0 when none drawn yet. Farmers only. */
+  geofenceCount?: number;
+  /** Crops this farmer has added. Farmers only. */
+  cropCount?: number;
 };
+
+/** A farmer is only fully set up once they have an agronomist, a farm boundary
+ *  and at least one crop. Returns the human-readable list of what is missing. */
+export function missingDetails(p: Person): string[] {
+  const missing: string[] = [];
+  if (!p.agronomist) missing.push("no agronomist");
+  if ((p.geofenceCount ?? 0) < 3) missing.push("no farm boundary");
+  if ((p.cropCount ?? 0) < 1) missing.push("no crop");
+  return missing;
+}
 
 export type PopStep = {
   day: [number, number];
@@ -238,6 +252,16 @@ export const api = {
 
   // Users
   listFarmers: () => json<Person[]>("/api/users/farmers"),
+  createFarmer: (body: {
+    name: string;
+    mobile: string;
+    agronomistId?: string | null;
+    crop?: string;
+    variety?: string;
+    dop?: string | null;
+  }) => json<Person>("/api/users/farmers", { method: "POST", body: JSON.stringify(body) }),
+  updateFarmer: (id: string, body: { name?: string; mobile?: string }) =>
+    json<Person>(`/api/users/farmers/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   listAgronomists: () => json<Person[]>("/api/users/agronomists"),
   getUser: (id: string) => json<Person & { role: string }>(`/api/users/${id}`),
   assignAgronomist: (farmerId: string, agronomistId: string | null) =>
@@ -246,6 +270,18 @@ export const api = {
       body: JSON.stringify({ agronomistId }),
     }),
   listUserCrops: (userId: string) => json<Crop[]>(`/api/users/${userId}/crops`),
+  addUserCrop: (
+    userId: string,
+    body: { name: string; variety?: string; dop?: string | null; area?: number | null }
+  ) => json<Crop>(`/api/users/${userId}/crops`, { method: "POST", body: JSON.stringify(body) }),
+  // Fill in or correct details on an existing crop — usually a missing D.O.P,
+  // which the whole Package of Practices schedule is counted from.
+  updateCrop: (
+    cropId: string,
+    body: { variety?: string; dop?: string | null; area?: number | null }
+  ) => json<Crop>(`/api/crops/${cropId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteCrop: (cropId: string) =>
+    json<{ message?: string }>(`/api/crops/${cropId}`, { method: "DELETE" }),
   getPractices: (crop: string) =>
     json<PackageOfPractices>(`/api/practices/${encodeURIComponent(crop)}`),
   listUserOrders: (userId: string) => json<Order[]>(`/api/orders/user/${userId}`),
