@@ -23,6 +23,10 @@ export type Person = {
   geofenceCount?: number;
   /** Crops this farmer has added. Farmers only. */
   cropCount?: number;
+  /** Farmers this agronomist registered themselves. Agronomists only. */
+  onboardedCount?: number;
+  /** Farmers handed to them — added from the dashboard or reassigned. Agronomists only. */
+  assignedCount?: number;
 };
 
 /** A farmer is only fully set up once they have an agronomist, a farm boundary
@@ -262,7 +266,15 @@ export const api = {
   }) => json<Person>("/api/users/farmers", { method: "POST", body: JSON.stringify(body) }),
   updateFarmer: (id: string, body: { name?: string; mobile?: string }) =>
     json<Person>(`/api/users/farmers/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  listAgronomists: () => json<Person[]>("/api/users/agronomists"),
+  // `from`/`to` (yyyy-mm-dd) narrow the onboarded/assigned counts to farmers
+  // registered in that window.
+  listAgronomists: (range?: { from?: string; to?: string }) => {
+    const q = new URLSearchParams();
+    if (range?.from) q.set("from", range.from);
+    if (range?.to) q.set("to", range.to);
+    const qs = q.toString();
+    return json<Person[]>(`/api/users/agronomists${qs ? `?${qs}` : ""}`);
+  },
   getUser: (id: string) => json<Person & { role: string }>(`/api/users/${id}`),
   assignAgronomist: (farmerId: string, agronomistId: string | null) =>
     json<Person>(`/api/users/${farmerId}/agronomist`, {

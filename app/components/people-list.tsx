@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X } from "lucide-react";
+import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays } from "lucide-react";
 import { api, CatalogCrop, missingDetails, Person } from "../lib/api";
 
 const PAGE_SIZE = 12;
@@ -28,8 +28,13 @@ function fmtDate(s: string) {
 export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const label = role === "farmer" ? "farmers" : "agronomists";
   const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
-  // Farmers also get District/Taluk/Village (from the boundary) and a Status column.
-  const colCount = showDetail ? 10 : 4;
+  // Agronomists get Onboarded / Assigned counts instead of the farmer-only columns.
+  const showCounts = role === "agronomist";
+  const colCount = showDetail ? 10 : 6;
+
+  // Date window for the agronomist onboarded/assigned counts.
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +60,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     setLoading(true);
     setError(null);
     try {
-      const data = role === "farmer" ? await api.listFarmers() : await api.listAgronomists();
+      const data =
+        role === "farmer" ? await api.listFarmers() : await api.listAgronomists({ from, to });
       setPeople(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -64,9 +70,18 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     }
   };
 
+  // Reloads on role change and whenever the agronomist date window moves.
+  useEffect(() => {
+    setPage(1);
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
+
   useEffect(() => {
     setPage(1);
     setQuery("");
+    setFrom("");
+    setTo("");
     load();
     // The agronomist and crop dropdowns are only needed on the farmers page.
     if (role === "farmer") {
@@ -155,6 +170,48 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
         )}
       </div>
 
+      {/* Date window for the onboarded/assigned counts */}
+      {showCounts && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100 px-3 py-2 text-sm dark:border-zinc-800">
+          <CalendarDays size={15} className="text-zinc-400" />
+          <span className="text-zinc-500">Counts for farmers registered</span>
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+          />
+          <span className="text-zinc-400">to</span>
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+          />
+          <button
+            onClick={() => {
+              const today = new Date().toISOString().slice(0, 10);
+              setFrom(today);
+              setTo(today);
+            }}
+            className="rounded-lg border border-zinc-300 px-2.5 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            Today
+          </button>
+          {(from || to) && (
+            <button
+              onClick={() => {
+                setFrom("");
+                setTo("");
+              }}
+              className="rounded-lg px-2.5 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+            >
+              All time
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
@@ -170,6 +227,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               {showDetail && <th className="px-4 py-3 font-semibold">Agronomist</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Status</th>}
               {showDetail && <th className="px-4 py-3 font-semibold text-right">Details</th>}
+              {showCounts && <th className="px-4 py-3 font-semibold">Onboarded</th>}
+              {showCounts && <th className="px-4 py-3 font-semibold">Assigned</th>}
             </tr>
           </thead>
           <tbody>
@@ -238,6 +297,22 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                       {missing.length > 0 && (
                         <div className="mt-1 text-xs text-zinc-500">{missing.join(" · ")}</div>
                       )}
+                    </td>
+                  )}
+                  {showCounts && (
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800 dark:bg-green-950/50 dark:text-green-300">
+                        {p.onboardedCount ?? 0}
+                      </span>
+                      <span className="ml-2 text-xs text-zinc-500">by them</span>
+                    </td>
+                  )}
+                  {showCounts && (
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-800 dark:bg-orange-950/50 dark:text-orange-300">
+                        {p.assignedCount ?? 0}
+                      </span>
+                      <span className="ml-2 text-xs text-zinc-500">handed over</span>
                     </td>
                   )}
                   {showDetail && (
