@@ -30,11 +30,13 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
   // Agronomists get Onboarded / Assigned counts instead of the farmer-only columns.
   const showCounts = role === "agronomist";
-  const colCount = showDetail ? 10 : 6;
+  const colCount = showDetail ? 11 : 6;
 
-  // Date window for the agronomist onboarded/assigned counts.
+  // Filters. On farmers these narrow the rows; on agronomists they narrow the
+  // onboarded/assigned counts.
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [agroFilter, setAgroFilter] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +63,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     setError(null);
     try {
       const data =
-        role === "farmer" ? await api.listFarmers() : await api.listAgronomists({ from, to });
+        role === "farmer"
+          ? await api.listFarmers({ agronomist: agroFilter, from, to })
+          : await api.listAgronomists({ from, to });
       setPeople(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -70,24 +74,23 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     }
   };
 
-  // Reloads on role change and whenever the agronomist date window moves.
+  // Reload whenever a filter moves.
   useEffect(() => {
     setPage(1);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to]);
+  }, [from, to, agroFilter]);
 
   useEffect(() => {
     setPage(1);
     setQuery("");
     setFrom("");
     setTo("");
+    setAgroFilter("");
     load();
-    // The agronomist and crop dropdowns are only needed on the farmers page.
-    if (role === "farmer") {
-      api.listAgronomists().then(setAgronomists).catch(() => {});
-      api.listCropCatalog().then(setCatalog).catch(() => {});
-    }
+    // The agronomist list feeds both the filter and the Add-farmer dropdown.
+    api.listAgronomists().then(setAgronomists).catch(() => {});
+    if (role === "farmer") api.listCropCatalog().then(setCatalog).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
@@ -127,8 +130,15 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     if (!q) return people;
     // Place names are searchable too, so "Anekal" finds every farmer in that taluk.
     return people.filter((p) =>
-      [p.name, p.mobile, p.farmAddress?.district, p.farmAddress?.taluk, p.farmAddress?.village]
-        .some((f) => f?.toLowerCase().includes(q))
+      [
+        p.name,
+        p.mobile,
+        p.farmAddress?.district,
+        p.farmAddress?.taluk,
+        p.farmAddress?.village,
+        p.agronomist?.name,
+        p.onboardedBy?.name,
+      ].some((f) => f?.toLowerCase().includes(q))
     );
   }, [people, query]);
 
@@ -170,11 +180,30 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
         )}
       </div>
 
-      {/* Date window for the onboarded/assigned counts */}
-      {showCounts && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100 px-3 py-2 text-sm dark:border-zinc-800">
-          <CalendarDays size={15} className="text-zinc-400" />
-          <span className="text-zinc-500">Counts for farmers registered</span>
+      {/* Filters: which farmers to show, or which farmers the counts cover */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100 px-3 py-2 text-sm dark:border-zinc-800">
+        {showDetail && (
+          <>
+            <span className="text-zinc-500">Agronomist</span>
+            <select
+              value={agroFilter}
+              onChange={(e) => setAgroFilter(e.target.value)}
+              className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+            >
+              <option value="">All</option>
+              <option value="none">— Unassigned —</option>
+              {agronomists.map((a) => (
+                <option key={a._id} value={a._id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        <CalendarDays size={15} className="text-zinc-400" />
+        <span className="text-zinc-500">
+          {showDetail ? "Registered" : "Counts for farmers registered"}
+        </span>
           <input
             type="date"
             value={from}
@@ -198,19 +227,19 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           >
             Today
           </button>
-          {(from || to) && (
-            <button
-              onClick={() => {
-                setFrom("");
-                setTo("");
-              }}
-              className="rounded-lg px-2.5 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
-            >
-              All time
-            </button>
-          )}
-        </div>
-      )}
+        {(from || to || agroFilter) && (
+          <button
+            onClick={() => {
+              setFrom("");
+              setTo("");
+              setAgroFilter("");
+            }}
+            className="rounded-lg px-2.5 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
 
       {/* Table */}
       <div className="overflow-x-auto">
@@ -225,6 +254,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               {showDetail && <th className="px-4 py-3 font-semibold">Taluk</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Village</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Agronomist</th>}
+              {showDetail && <th className="px-4 py-3 font-semibold">Onboarded by</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Status</th>}
               {showDetail && <th className="px-4 py-3 font-semibold text-right">Details</th>}
               {showCounts && <th className="px-4 py-3 font-semibold">Onboarded</th>}
@@ -275,6 +305,22 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                         p.agronomist.name
                       ) : (
                         <span className="text-zinc-400">Unassigned</span>
+                      )}
+                    </td>
+                  )}
+                  {showDetail && (
+                    <td className="px-4 py-3">
+                      {p.onboardedBy ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-800 dark:bg-green-950/50 dark:text-green-300">
+                          {p.onboardedBy.name}
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-800 dark:bg-orange-950/50 dark:text-orange-300"
+                          title="Added from the dashboard, or registered before this was recorded"
+                        >
+                          Dashboard
+                        </span>
                       )}
                     </td>
                   )}

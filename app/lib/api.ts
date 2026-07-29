@@ -18,6 +18,8 @@ export type Person = {
   geofence?: { latitude: number; longitude: number }[]; // farm-boundary polygon
   farmAddress?: FarmAddress;
   agronomist?: { _id: string; name: string; mobile: string } | null;
+  /** The agronomist who registered this farmer. Null = added from the dashboard. */
+  onboardedBy?: { _id: string; name: string; mobile: string } | null;
   createdAt: string;
   /** Corners in the farm boundary; 0 when none drawn yet. Farmers only. */
   geofenceCount?: number;
@@ -231,6 +233,42 @@ export type Visit = {
   createdAt: string;
 };
 
+/** One product line in a field sale, with its own before/after crop photos. */
+export type ProductSaleItem = {
+  product: string;
+  name: string;
+  unit: string;
+  imageUrl: string;
+  qty: number;
+  unitPrice: number;
+  lineTotal: number;
+  /** Taken at handover. */
+  beforePhotoUrl: string;
+  /** Taken on the follow-up visit a week later; empty until then. */
+  afterPhotoUrl: string;
+  afterPhotoAt: string | null;
+};
+
+/** A basket of products an agronomist sold to a farmer out on the farm. */
+export type ProductSale = {
+  _id: string;
+  agronomist: { _id: string; name: string; mobile: string } | null;
+  agronomistName: string;
+  farmer: string;
+  farmerName: string;
+  farmerMobile: string;
+  crop: string | null;
+  cropName: string;
+  items: ProductSaleItem[];
+  total: number;
+  location: { latitude: number | null; longitude: number | null };
+  notes: string;
+  soldAt: string;
+  /** When the follow-up after-photos become collectable. */
+  afterDueAt: string | null;
+  createdAt: string;
+};
+
 export const api = {
   // Admin auth. There is no register/sign-up: admins are created from the Account tab.
   login: (mobile: string, password: string) =>
@@ -255,7 +293,15 @@ export const api = {
     }),
 
   // Users
-  listFarmers: () => json<Person[]>("/api/users/farmers"),
+  // `agronomist` ('none' for unassigned) and `from`/`to` (yyyy-mm-dd) filter server-side.
+  listFarmers: (opts?: { agronomist?: string; from?: string; to?: string }) => {
+    const q = new URLSearchParams();
+    if (opts?.agronomist) q.set("agronomist", opts.agronomist);
+    if (opts?.from) q.set("from", opts.from);
+    if (opts?.to) q.set("to", opts.to);
+    const qs = q.toString();
+    return json<Person[]>(`/api/users/farmers${qs ? `?${qs}` : ""}`);
+  },
   createFarmer: (body: {
     name: string;
     mobile: string;
@@ -334,6 +380,16 @@ export const api = {
 
   // Farm visits logged by agronomists
   listVisits: () => json<Visit[]>("/api/visits"),
+
+  // Products sold to farmers on the field. Optional filters narrow the list.
+  listProductSales: (params?: { agronomistId?: string; farmerId?: string; since?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.agronomistId) q.set("agronomist", params.agronomistId);
+    if (params?.farmerId) q.set("farmer", params.farmerId);
+    if (params?.since) q.set("since", params.since);
+    const qs = q.toString();
+    return json<ProductSale[]>(`/api/product-sales${qs ? `?${qs}` : ""}`);
+  },
 
   // Crop catalog (crops a farmer can pick from in the app)
   listCropCatalog: () => json<CatalogCrop[]>("/api/crop-catalog"),
