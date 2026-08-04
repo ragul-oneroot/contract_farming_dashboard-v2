@@ -29,6 +29,10 @@ export type Person = {
   onboardedCount?: number;
   /** Farmers handed to them — added from the dashboard or reassigned. Agronomists only. */
   assignedCount?: number;
+  /** The conversation recorded while this farmer was onboarded. Farmers only. */
+  onboardingAudioUrl?: string;
+  onboardingAudioAt?: string | null;
+  onboardingAudioSeconds?: number;
 };
 
 /** A farmer is only fully set up once they have an agronomist, a farm boundary
@@ -216,6 +220,17 @@ export type DailyReport = {
   dailyExpenses: string;
   expectedExpensesTomorrow: string;
   planOfActionTomorrow: string;
+  /** Measured at submission — absent on reports filed before tracking existed. */
+  stats?: {
+    distanceKm: number;
+    trackedMinutes: number;
+    sessions: number;
+    newFarmers: number;
+    oldFarmers: number;
+    visits: number;
+    sales: number;
+    salesTotal: number;
+  };
   date: string;
   createdAt: string;
 };
@@ -267,6 +282,72 @@ export type ProductSale = {
   /** When the follow-up after-photos become collectable. */
   afterDueAt: string | null;
   createdAt: string;
+};
+
+/** A senior agronomist's answer to a disease report. */
+export type DiseaseReply = {
+  senior: string;
+  seniorName: string;
+  advice: string;
+  at: string;
+};
+
+/** A crop a field agent photographed and sent up for advice. */
+export type DiseaseReport = {
+  _id: string;
+  reporter: { _id: string; name: string; mobile: string; role: string } | null;
+  reporterName: string;
+  farmer: string | null;
+  farmerName: string;
+  farmerMobile: string;
+  crop: string | null;
+  cropName: string;
+  photos: string[];
+  note: string;
+  location: { latitude: number | null; longitude: number | null };
+  status: "open" | "answered";
+  replies: DiseaseReply[];
+  answeredAt: string | null;
+  createdAt: string;
+};
+
+/** One GPS fix along a tracked route. */
+export type TrackPoint = {
+  latitude: number;
+  longitude: number;
+  at: string;
+  accuracy?: number | null;
+};
+
+/** A tracked work day: START to END, with the route walked in between. */
+export type TrackingSession = {
+  _id: string;
+  user: { _id: string; name: string; mobile: string; role: string } | null;
+  userName: string;
+  role: string;
+  /** 'no_field' is a declared day in, with a reason instead of a route. */
+  kind: "tracked" | "no_field";
+  reason: string;
+  startAt: string;
+  endAt: string | null;
+  startPhotoUrl: string;
+  endPhotoUrl: string;
+  /** Only the single-session fetch carries the route; the list omits it. */
+  points?: TrackPoint[];
+  distanceKm: number;
+  createdAt: string;
+};
+
+/** A day's work, measured from what was recorded rather than typed. */
+export type DayStats = {
+  distanceKm: number;
+  trackedMinutes: number;
+  sessions: number;
+  newFarmers: number;
+  oldFarmers: number;
+  visits: number;
+  sales: number;
+  salesTotal: number;
 };
 
 export const api = {
@@ -380,6 +461,29 @@ export const api = {
 
   // Farm visits logged by agronomists
   listVisits: () => json<Visit[]>("/api/visits"),
+
+  // Crops reported as diseased, and the advice sent back.
+  listDiseaseReports: (status?: "open" | "answered") =>
+    json<DiseaseReport[]>(`/api/disease-reports${status ? `?status=${status}` : ""}`),
+
+  // Tracked work days. The list omits routes — they are thousands of points each.
+  listTracking: (params?: { userId?: string; from?: string; to?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.userId) q.set("user", params.userId);
+    if (params?.from) q.set("from", params.from);
+    if (params?.to) q.set("to", params.to);
+    const qs = q.toString();
+    return json<TrackingSession[]>(`/api/tracking${qs ? `?${qs}` : ""}`);
+  },
+  /** One session WITH its route, for the map. */
+  getTrackingSession: (id: string) => json<TrackingSession>(`/api/tracking/${id}`),
+
+  /** A single agent's measured numbers for one day. `date` is yyyy-mm-dd. */
+  getDayStats: (userId: string, date?: string) => {
+    const q = new URLSearchParams({ user: userId });
+    if (date) q.set("date", date);
+    return json<DayStats>(`/api/day-stats?${q.toString()}`);
+  },
 
   // Products sold to farmers on the field. Optional filters narrow the list.
   listProductSales: (params?: { agronomistId?: string; farmerId?: string; since?: string }) => {

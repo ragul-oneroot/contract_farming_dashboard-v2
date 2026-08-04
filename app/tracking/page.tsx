@@ -1,0 +1,330 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { Navigation, Clock, MapPin, X, CloudRain } from "lucide-react";
+import { api, Person, TrackingSession } from "../lib/api";
+
+function fmtDateTime(s: string) {
+  return new Date(s).toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function fmtTime(s: string) {
+  return new Date(s).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function duration(from: string, to: string | null) {
+  const mins = Math.max(0, Math.round(((to ? new Date(to) : new Date()).getTime() - new Date(from).getTime()) / 60000));
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+/**
+ * The route drawn on satellite imagery, in a sandboxed iframe.
+ *
+ * Leaflet is loaded from a CDN inside the frame rather than bundled: the map is
+ * one screen in the whole dashboard, and this keeps it out of the app bundle.
+ */
+function RouteMap({ session }: { session: TrackingSession }) {
+  const points = (session.points ?? []).filter((p) => p.latitude != null && p.longitude != null);
+
+  const html = useMemo(() => {
+    const coords = points.map((p) => [p.latitude, p.longitude]);
+    return `<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>html,body,#map{height:100%;margin:0;padding:0;background:#eee}</style></head>
+<body><div id="map"></div><script>
+  var C = ${JSON.stringify(coords)};
+  var map = L.map('map', { attributionControl: false });
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20 }).addTo(map);
+  if (C.length > 1) {
+    var line = L.polyline(C, { color: '#2E9E5B', weight: 4, opacity: 0.9 }).addTo(map);
+    // Start and end, so the direction of travel is readable at a glance.
+    L.circleMarker(C[0], { radius: 7, color: '#fff', weight: 3, fillColor: '#2E9E5B', fillOpacity: 1 })
+      .addTo(map).bindTooltip('Start');
+    L.circleMarker(C[C.length - 1], { radius: 7, color: '#fff', weight: 3, fillColor: '#E5484D', fillOpacity: 1 })
+      .addTo(map).bindTooltip('End');
+    map.fitBounds(line.getBounds(), { padding: [30, 30] });
+  } else if (C.length === 1) {
+    map.setView(C[0], 16);
+    L.marker(C[0]).addTo(map);
+  } else {
+    map.setView([12.9716, 77.5946], 11);
+  }
+</script></body></html>`;
+  }, [points]);
+
+  if (points.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+        No location points were recorded for this session.
+      </div>
+    );
+  }
+
+  return <iframe srcDoc={html} className="h-full w-full border-0" sandbox="allow-scripts" />;
+}
+
+export default function TrackingPage() {
+  const [sessions, setSessions] = useState<TrackingSession[]>([]);
+  const [agents, setAgents] = useState<Person[]>([]);
+  const [who, setWho] = useState("");
+  const [from, setFrom] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // The session whose route is open, fetched separately because the list
+  // deliberately omits points.
+  const [open, setOpen] = useState<TrackingSession | null>(null);
+  const [openLoading, setOpenLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      api.listTracking({ userId: who || undefined, from: from || undefined }),
+      api.listAgronomists().catch(() => [] as Person[]),
+    ])
+      .then(([s, a]) => {
+        setSessions(s);
+        setAgents(a);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load tracking"))
+      .finally(() => setLoading(false));
+  }, [who, from]);
+
+  const showRoute = async (id: string) => {
+    setOpenLoading(true);
+    try {
+      setOpen(await api.getTrackingSession(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load the route");
+    } finally {
+      setOpenLoading(false);
+    }
+  };
+
+  const totals = useMemo(() => {
+    // Declared days in are not tracked days: counting them would drag the
+    // averages down and imply the agent worked a zero-kilometre shift.
+    const tracked = sessions.filter((s) => s.kind !== "no_field");
+    const km = tracked.reduce((s, x) => s + (x.distanceKm || 0), 0);
+    const mins = tracked.reduce(
+      (s, x) => s + ((x.endAt ? new Date(x.endAt) : new Date()).getTime() - new Date(x.startAt).getTime()) / 60000,
+      0
+    );
+    return {
+      km: Math.round(km * 10) / 10,
+      hours: Math.round(mins / 6) / 10,
+      tracked: tracked.length,
+      live: tracked.filter((s) => !s.endAt).length,
+      off: sessions.length - tracked.length,
+    };
+  }, [sessions]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Navigation size={20} className="text-green-600" />
+          <h2 className="text-lg font-semibold">Tracking ({sessions.length})</h2>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={who}
+            onChange={(e) => setWho(e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            <option value="">All agents</option>
+            {agents.map((a) => (
+              <option key={a._id} value={a._id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          {(who || from) && (
+            <button
+              onClick={() => {
+                setWho("");
+                setFrom("");
+              }}
+              className="text-sm text-zinc-500 hover:underline"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {[
+          { label: "Distance", value: `${totals.km} km` },
+          { label: "Time tracked", value: `${totals.hours} h` },
+          { label: "Tracked days", value: String(totals.tracked) },
+          { label: "No field work", value: String(totals.off) },
+          { label: "Running now", value: String(totals.live), alert: totals.live > 0 },
+        ].map((s) => (
+          <div
+            key={s.label}
+            className="card p-3"
+          >
+            <div className="text-xs uppercase tracking-wide text-zinc-500">{s.label}</div>
+            <div className={`mt-1 text-xl font-semibold${s.alert ? " text-green-600" : ""}`}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {loading ? (
+        <p className="text-zinc-500">Loading…</p>
+      ) : error ? (
+        <p className="text-red-600">{error}</p>
+      ) : sessions.length === 0 ? (
+        <p className="text-sm text-zinc-500">
+          No tracked days yet. They appear when an agent taps START in the app.
+        </p>
+      ) : (
+        <div className="overflow-x-auto card">
+          <table className="w-full min-w-[900px] text-sm">
+            <thead>
+              <tr className="border-b border-zinc-200 text-left text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+                <th className="px-4 py-3 font-medium">Agent</th>
+                <th className="px-4 py-3 font-medium">Started</th>
+                <th className="px-4 py-3 font-medium">Ended</th>
+                <th className="px-4 py-3 font-medium">Duration</th>
+                <th className="px-4 py-3 font-medium">Distance</th>
+                <th className="px-4 py-3 font-medium">Photos</th>
+                <th className="px-4 py-3 font-medium">Route</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((s) => {
+                // A declared day in has no route or distance — it has a reason,
+                // and showing it as "0 km" would read as a failure to work.
+                const off = s.kind === "no_field";
+                const shots = [
+                  { url: s.startPhotoUrl, label: off ? "Reason" : "Start" },
+                  { url: s.endPhotoUrl, label: "End" },
+                ].filter((p) => p.url);
+                return (
+                  <tr key={s._id} className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-900">
+                    <td className="px-4 py-3">
+                      <div className="font-medium">{s.user?.name || s.userName || "—"}</div>
+                      {s.user?.mobile ? <div className="text-xs text-zinc-500">{s.user.mobile}</div> : null}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-zinc-500">{fmtDateTime(s.startAt)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-zinc-500">
+                      {off ? (
+                        "—"
+                      ) : s.endAt ? (
+                        fmtTime(s.endAt)
+                      ) : (
+                        <span className="inline-flex items-center gap-1 font-medium text-green-600">
+                          <span className="h-2 w-2 animate-pulse rounded-full bg-green-600" /> Running
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-zinc-500">
+                      {off ? (
+                        "—"
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <Clock size={13} /> {duration(s.startAt, s.endAt)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {off ? (
+                        <div className="max-w-[220px]">
+                          <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-500 dark:ring-amber-900">
+                            <CloudRain size={12} /> No field work
+                          </span>
+                          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{s.reason}</div>
+                        </div>
+                      ) : (
+                        <span className="font-semibold text-green-600">{s.distanceKm} km</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {shots.length > 0 ? (
+                        <div className="flex gap-1.5">
+                          {shots.map((p) => (
+                            <a key={p.label} href={p.url} target="_blank" rel="noopener noreferrer" title={p.label}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={p.url}
+                                alt={p.label}
+                                className="h-12 w-12 rounded-md object-cover ring-1 ring-zinc-200 hover:ring-green-500 dark:ring-zinc-700"
+                              />
+                              <div className="mt-0.5 text-center text-[10px] text-zinc-500">{p.label}</div>
+                            </a>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-zinc-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {off ? (
+                        <span className="text-xs text-zinc-400">—</span>
+                      ) : (
+                        <button
+                          onClick={() => showRoute(s._id)}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-green-600 hover:underline"
+                        >
+                          <MapPin size={13} /> View route
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Route map */}
+      {(open || openLoading) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="flex h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white dark:bg-zinc-950">
+            <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+              <div>
+                <div className="font-medium">{open?.user?.name || open?.userName || "Route"}</div>
+                {open && (
+                  <div className="text-xs text-zinc-500">
+                    {fmtDateTime(open.startAt)} · {duration(open.startAt, open.endAt)} ·{" "}
+                    {open.distanceKm} km · {open.points?.length ?? 0} points
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setOpen(null)}
+                className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1">
+              {openLoading ? (
+                <div className="flex h-full items-center justify-center text-sm text-zinc-500">Loading route…</div>
+              ) : open ? (
+                <RouteMap session={open} />
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

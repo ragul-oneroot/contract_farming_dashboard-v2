@@ -48,6 +48,7 @@ export default function ReportsPage() {
               <tr className="border-b border-zinc-200 text-left text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
                 <th className="px-4 py-3 font-medium">Field Agent</th>
                 <th className="px-4 py-3 font-medium">Date</th>
+                <th className="px-4 py-3 font-medium">Measured</th>
                 <th className="px-4 py-3 font-medium">Daily Report</th>
                 <th className="px-4 py-3 font-medium">Today&apos;s Expenses</th>
                 <th className="px-4 py-3 font-medium">Expected (Tomorrow)</th>
@@ -67,6 +68,34 @@ export default function ReportsPage() {
                       {r.user?.mobile ? <div className="text-xs text-zinc-500">{r.user.mobile}</div> : null}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-zinc-500">{fmtDate(r.date)}</td>
+                    {/* Recorded by the app, not typed by the agent. Reports filed
+                        before tracking existed simply have none. */}
+                    <td className="px-4 py-3">
+                      {r.stats ? (
+                        <div className="flex flex-col gap-0.5 text-xs">
+                          <span className="font-semibold text-green-600">{r.stats.distanceKm} km</span>
+                          <span className="text-zinc-500">
+                            {Math.floor(r.stats.trackedMinutes / 60)}h {r.stats.trackedMinutes % 60}m tracked
+                          </span>
+                          <span className="text-zinc-500">
+                            <b className="text-zinc-700 dark:text-zinc-200">{r.stats.newFarmers}</b>{" "}
+                            new onboarded
+                          </span>
+                          <span className="text-zinc-500">
+                            <b className="text-zinc-700 dark:text-zinc-200">{r.stats.oldFarmers}</b>{" "}
+                            existing met
+                          </span>
+                          <span className="text-zinc-500">
+                            {r.stats.visits} visits
+                            {r.stats.salesTotal > 0
+                              ? ` · ₹${r.stats.salesTotal.toLocaleString("en-IN")}`
+                              : ""}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs italic text-zinc-400">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3"><div className="max-w-[240px]">{cell(r.dailyReport)}</div></td>
                     <td className="px-4 py-3"><div className="max-w-[150px]">{cell(r.dailyExpenses)}</div></td>
                     <td className="px-4 py-3"><div className="max-w-[150px]">{cell(r.expectedExpensesTomorrow)}</div></td>

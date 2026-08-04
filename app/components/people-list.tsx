@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays } from "lucide-react";
 import { api, CatalogCrop, missingDetails, Person } from "../lib/api";
+import { AudioPlayer } from "./audio-player";
 
 const PAGE_SIZE = 12;
 
@@ -30,7 +31,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
   // Agronomists get Onboarded / Assigned counts instead of the farmer-only columns.
   const showCounts = role === "agronomist";
-  const colCount = showDetail ? 11 : 6;
+  const colCount = showDetail ? 12 : 6;
 
   // Filters. On farmers these narrow the rows; on agronomists they narrow the
   // onboarded/assigned counts.
@@ -243,7 +244,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
 
       {/* Table */}
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+        {/* Twelve columns including an inline player: below this the cells crush
+            each other, so let the wrapper scroll instead. */}
+        <table className={`w-full text-left text-sm ${showDetail ? "min-w-[1280px]" : ""}`}>
           <thead className="bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-300">
             <tr>
               <th className="px-4 py-3 font-semibold">Name</th>
@@ -255,6 +258,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               {showDetail && <th className="px-4 py-3 font-semibold">Village</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Agronomist</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Onboarded by</th>}
+              {showDetail && (
+                <th className="whitespace-nowrap px-4 py-3 font-semibold">Recording</th>
+              )}
               {showDetail && <th className="px-4 py-3 font-semibold">Status</th>}
               {showDetail && <th className="px-4 py-3 font-semibold text-right">Details</th>}
               {showCounts && <th className="px-4 py-3 font-semibold">Onboarded</th>}
@@ -321,6 +327,20 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                         >
                           Dashboard
                         </span>
+                      )}
+                    </td>
+                  )}
+                  {/* The conversation recorded while this farmer was onboarded. */}
+                  {showDetail && (
+                    <td className="px-4 py-3">
+                      {p.onboardingAudioUrl ? (
+                        <AudioPlayer
+                          src={p.onboardingAudioUrl}
+                          compact
+                          fallbackSeconds={p.onboardingAudioSeconds ?? 0}
+                        />
+                      ) : (
+                        <span className="text-xs text-zinc-400">—</span>
                       )}
                     </td>
                   )}

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Phone, MapPin, Sprout, ShoppingCart, UserCog, Map as MapIcon, Camera, ClipboardCheck, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, Phone, MapPin, Sprout, ShoppingCart, UserCog, Map as MapIcon, Camera, ClipboardCheck, Pencil, Plus, Trash2, X, Mic } from "lucide-react";
 import {
   api,
   CatalogCrop,
@@ -14,6 +14,7 @@ import {
   Person,
   Product,
 } from "../../lib/api";
+import { AudioPlayer } from "../../components/audio-player";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -296,6 +297,39 @@ export default function FarmerDetailPage() {
           ))}
         </select>
       </div>
+
+      {/* The conversation recorded while this farmer was being onboarded. */}
+      {farmer?.onboardingAudioUrl ? (
+        <section>
+          <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+            <Mic size={18} className="text-green-600" /> Onboarding recording
+          </h2>
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+            <AudioPlayer
+              src={farmer.onboardingAudioUrl}
+              fallbackSeconds={farmer.onboardingAudioSeconds ?? 0}
+            />
+            <div className="mt-3 text-xs text-zinc-500">
+              Recorded while this farmer was registered
+              {farmer.onboardingAudioAt
+                ? ` on ${new Date(farmer.onboardingAudioAt).toLocaleString(undefined, {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`
+                : ""}
+              {farmer.onboardingAudioSeconds
+                ? ` · ${Math.floor(farmer.onboardingAudioSeconds / 60)}m ${
+                    farmer.onboardingAudioSeconds % 60
+                  }s`
+                : ""}
+              {farmer.onboardedBy?.name ? ` · by ${farmer.onboardedBy.name}` : ""}
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {/* Farm boundary (geofence) */}
       <section>
