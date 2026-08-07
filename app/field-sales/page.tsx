@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, MapPin, ShoppingBag } from "lucide-react";
 import { api, Person, ProductSale } from "../lib/api";
+import { PhotoThumb } from "../components/lightbox";
 
 function fmtTime(s: string) {
   return new Date(s).toLocaleString(undefined, {
@@ -34,18 +35,25 @@ function ProofPhotos({
   const daysLeft = due ? Math.ceil((due.getTime() - Date.now()) / 86_400_000) : 0;
   const overdue = !after && (!due || daysLeft <= 0);
 
+  // Both shots of the same product form one group, so the lightbox arrows step
+  // straight from before to after — which is the comparison being made.
+  const pair = [
+    ...(before ? [{ url: before, caption: "Before" }] : []),
+    ...(after ? [{ url: after, caption: "After" }] : []),
+  ];
+
   return (
     <div className="flex gap-2">
       <div>
         {before ? (
-          <a href={before} target="_blank" rel="noopener noreferrer" className="group">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={before}
-              alt="Before photo"
-              className="h-24 w-24 rounded-lg object-cover ring-1 ring-zinc-200 group-hover:ring-green-500 dark:ring-zinc-700"
-            />
-          </a>
+          <PhotoThumb
+            url={before}
+            caption="Before"
+            group={pair}
+            index={0}
+            alt="Before photo"
+            className="h-24 w-24 rounded-lg object-cover ring-1 ring-zinc-200 hover:ring-green-500 dark:ring-zinc-700"
+          />
         ) : (
           <div className="flex h-24 w-24 items-center justify-center rounded-lg bg-zinc-100 text-[11px] text-zinc-400 dark:bg-zinc-900">
             No photo
@@ -56,14 +64,14 @@ function ProofPhotos({
 
       <div>
         {after ? (
-          <a href={after} target="_blank" rel="noopener noreferrer" className="group">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={after}
-              alt="After photo"
-              className="h-24 w-24 rounded-lg object-cover ring-1 ring-zinc-200 group-hover:ring-green-500 dark:ring-zinc-700"
-            />
-          </a>
+          <PhotoThumb
+            url={after}
+            caption="After"
+            group={pair}
+            index={pair.length - 1}
+            alt="After photo"
+            className="h-24 w-24 rounded-lg object-cover ring-1 ring-zinc-200 hover:ring-green-500 dark:ring-zinc-700"
+          />
         ) : overdue ? (
           <div className="flex h-24 w-24 flex-col items-center justify-center rounded-lg bg-red-50 px-1 text-center text-[11px] font-medium text-red-600 ring-1 ring-red-200 dark:bg-red-950/40 dark:ring-red-900">
             Overdue

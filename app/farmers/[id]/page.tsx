@@ -15,6 +15,7 @@ import {
   Product,
 } from "../../lib/api";
 import { AudioPlayer } from "../../components/audio-player";
+import { PhotoThumb } from "../../components/lightbox";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -441,13 +442,18 @@ export default function FarmerDetailPage() {
                     <div className="mt-3 flex flex-wrap gap-2">
                       {crop.progress
                         .filter((p) => p.imageUrl)
-                        .map((p) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
+                        .map((p, pi, all) => (
+                          <PhotoThumb
                             key={p.stepIndex}
-                            src={p.imageUrl}
+                            url={p.imageUrl}
+                            caption={pop?.steps[p.stepIndex]?.operation ?? `Step ${p.stepIndex + 1}`}
+                            group={all.map((x) => ({
+                              url: x.imageUrl,
+                              caption:
+                                pop?.steps[x.stepIndex]?.operation ?? `Step ${x.stepIndex + 1}`,
+                            }))}
+                            index={pi}
                             alt={`Step ${p.stepIndex + 1}`}
-                            title={pop?.steps[p.stepIndex]?.operation ?? `Step ${p.stepIndex + 1}`}
                             className="h-12 w-12 rounded-md object-cover"
                           />
                         ))}
@@ -478,8 +484,12 @@ export default function FarmerDetailPage() {
                 className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
               >
                 {v.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={v.imageUrl} alt="Verification proof" className="h-16 w-16 shrink-0 rounded-md object-cover" />
+                  <PhotoThumb
+                    url={v.imageUrl}
+                    caption="Verification proof"
+                    alt="Verification proof"
+                    className="h-16 w-16 shrink-0 rounded-md object-cover"
+                  />
                 ) : (
                   <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-zinc-100 text-zinc-400 dark:bg-zinc-900">
                     <Camera size={20} />
@@ -531,8 +541,12 @@ export default function FarmerDetailPage() {
                 key={i}
                 className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={pp.imageUrl} alt="Product usage" className="h-40 w-full object-cover" />
+                <PhotoThumb
+                  url={pp.imageUrl}
+                  caption={productById[pp.productId]?.name ?? "Product usage"}
+                  alt="Product usage"
+                  className="h-40 w-full object-cover"
+                />
                 <div className="p-3">
                   <div className="text-sm font-medium">
                     {productById[pp.productId]?.name ?? "Product"}

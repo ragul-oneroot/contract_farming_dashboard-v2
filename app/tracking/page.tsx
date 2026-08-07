@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigation, Clock, MapPin, X, CloudRain } from "lucide-react";
 import { api, Person, TrackingSession } from "../lib/api";
+import { PhotoThumb } from "../components/lightbox";
 
 function fmtDateTime(s: string) {
   return new Date(s).toLocaleString(undefined, {
@@ -32,7 +33,8 @@ function RouteMap({ session }: { session: TrackingSession }) {
   const points = (session.points ?? []).filter((p) => p.latitude != null && p.longitude != null);
 
   const html = useMemo(() => {
-    const coords = points.map((p) => [p.latitude, p.longitude]);
+    // `at` travels with each fix so a dot can say when it was recorded.
+    const coords = points.map((p) => [p.latitude, p.longitude, p.at ?? null]);
     return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -42,17 +44,41 @@ function RouteMap({ session }: { session: TrackingSession }) {
   var C = ${JSON.stringify(coords)};
   var map = L.map('map', { attributionControl: false });
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20 }).addTo(map);
-  if (C.length > 1) {
-    var line = L.polyline(C, { color: '#2E9E5B', weight: 4, opacity: 0.9 }).addTo(map);
-    // Start and end, so the direction of travel is readable at a glance.
-    L.circleMarker(C[0], { radius: 7, color: '#fff', weight: 3, fillColor: '#2E9E5B', fillOpacity: 1 })
-      .addTo(map).bindTooltip('Start');
-    L.circleMarker(C[C.length - 1], { radius: 7, color: '#fff', weight: 3, fillColor: '#E5484D', fillOpacity: 1 })
-      .addTo(map).bindTooltip('End');
-    map.fitBounds(line.getBounds(), { padding: [30, 30] });
-  } else if (C.length === 1) {
-    map.setView(C[0], 16);
-    L.marker(C[0]).addTo(map);
+
+  function timeAt(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  if (C.length) {
+    // Every recorded fix as its own dot, deliberately NOT joined into a line:
+    // a polyline draws a straight segment between consecutive fixes, which
+    // invents travel through whatever lies between them. The dots show only
+    // where the agent was actually recorded.
+    C.forEach(function (c, i) {
+      var first = i === 0;
+      var last = i === C.length - 1;
+      var fill = first ? '#2E9E5B' : last ? '#E5484D' : '#1E88E5';
+      L.circleMarker([c[0], c[1]], {
+        radius: first || last ? 7 : 4,
+        color: '#fff',
+        weight: first || last ? 3 : 1.5,
+        fillColor: fill,
+        fillOpacity: first || last ? 1 : 0.85,
+      })
+        .addTo(map)
+        .bindTooltip(
+          (first ? 'Start' : last ? 'End' : 'Point ' + (i + 1)) +
+            (timeAt(c[2]) ? ' · ' + timeAt(c[2]) : '')
+        );
+    });
+
+    if (C.length > 1) {
+      map.fitBounds(L.latLngBounds(C.map(function (c) { return [c[0], c[1]]; })), { padding: [30, 30] });
+    } else {
+      map.setView([C[0][0], C[0][1]], 16);
+    }
   } else {
     map.setView([12.9716, 77.5946], 11);
   }
@@ -258,16 +284,18 @@ export default function TrackingPage() {
                     <td className="px-4 py-3">
                       {shots.length > 0 ? (
                         <div className="flex gap-1.5">
-                          {shots.map((p) => (
-                            <a key={p.label} href={p.url} target="_blank" rel="noopener noreferrer" title={p.label}>
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={p.url}
+                          {shots.map((p, pi) => (
+                            <div key={p.label}>
+                              <PhotoThumb
+                                url={p.url}
+                                caption={p.label}
+                                group={shots.map((x) => ({ url: x.url, caption: x.label }))}
+                                index={pi}
                                 alt={p.label}
                                 className="h-12 w-12 rounded-md object-cover ring-1 ring-zinc-200 hover:ring-green-500 dark:ring-zinc-700"
                               />
                               <div className="mt-0.5 text-center text-[10px] text-zinc-500">{p.label}</div>
-                            </a>
+                            </div>
                           ))}
                         </div>
                       ) : (

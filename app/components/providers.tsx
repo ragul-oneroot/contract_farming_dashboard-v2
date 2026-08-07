@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { AuthProvider, useAuth } from "../lib/auth";
+import { LightboxProvider } from "./lightbox";
 import { Shell } from "./shell";
 
 // Redirects unauthenticated admins to /login and keeps signed-in admins out of it.
@@ -33,7 +34,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <AuthGate>{children}</AuthGate>
+      {/* Outside AuthGate so the overlay sits above the shell chrome. */}
+      <LightboxProvider>
+        <AuthGate>{children}</AuthGate>
+      </LightboxProvider>
     </AuthProvider>
   );
 }

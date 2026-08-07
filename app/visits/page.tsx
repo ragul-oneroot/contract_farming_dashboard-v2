@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { MapPin, ExternalLink } from "lucide-react";
 import { api, Visit } from "../lib/api";
+import { PhotoThumb } from "../components/lightbox";
 
 function fmtTime(s: string) {
   return new Date(s).toLocaleString(undefined, {
@@ -75,14 +76,15 @@ export default function VisitsPage() {
                       {photos.length > 0 ? (
                         <div className="flex gap-1.5">
                           {photos.map((p, i) => (
-                            <a key={i} href={p.url} target="_blank" rel="noopener noreferrer" title={p.label}>
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={p.url}
-                                alt={p.label}
-                                className="h-12 w-12 rounded-md object-cover ring-1 ring-zinc-200 hover:ring-green-500 dark:ring-zinc-700"
-                              />
-                            </a>
+                            <PhotoThumb
+                              key={i}
+                              url={p.url}
+                              caption={p.label}
+                              group={photos.map((x) => ({ url: x.url, caption: x.label }))}
+                              index={i}
+                              alt={p.label}
+                              className="h-12 w-12 rounded-md object-cover ring-1 ring-zinc-200 hover:ring-green-500 dark:ring-zinc-700"
+                            />
                           ))}
                         </div>
                       ) : (

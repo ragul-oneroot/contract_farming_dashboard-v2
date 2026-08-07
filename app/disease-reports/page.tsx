@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bug, Clock, MapPin, ExternalLink, MessageSquare } from "lucide-react";
 import { api, DiseaseReport } from "../lib/api";
+import { PhotoThumb } from "../components/lightbox";
 
 function fmtDateTime(s: string) {
   return new Date(s).toLocaleString(undefined, {
@@ -159,15 +160,19 @@ export default function DiseaseReportsPage() {
 
                 {r.photos.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {r.photos.map((p) => (
-                      <a key={p} href={p} target="_blank" rel="noopener noreferrer">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={p}
-                          alt="Reported crop"
-                          className="h-28 w-28 rounded-lg object-cover ring-1 ring-zinc-200 hover:ring-green-500 dark:ring-zinc-700"
-                        />
-                      </a>
+                    {r.photos.map((p, pi) => (
+                      <PhotoThumb
+                        key={p}
+                        url={p}
+                        caption={[r.cropName || "Crop", r.farmerName].filter(Boolean).join(" · ")}
+                        group={r.photos.map((u) => ({
+                          url: u,
+                          caption: [r.cropName || "Crop", r.farmerName].filter(Boolean).join(" · "),
+                        }))}
+                        index={pi}
+                        alt="Reported crop"
+                        className="h-28 w-28 rounded-lg object-cover ring-1 ring-zinc-200 hover:ring-green-500 dark:ring-zinc-700"
+                      />
                     ))}
                   </div>
                 )}
