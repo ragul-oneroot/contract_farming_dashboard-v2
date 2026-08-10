@@ -31,13 +31,21 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
   // Agronomists get Onboarded / Assigned counts instead of the farmer-only columns.
   const showCounts = role === "agronomist";
-  const colCount = showDetail ? 12 : 6;
+  const colCount = showDetail ? 13 : 6;
 
   // Filters. On farmers these narrow the rows; on agronomists they narrow the
   // onboarded/assigned counts.
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [agroFilter, setAgroFilter] = useState("");
+  /**
+   * Which agronomist registered the farmer in the field. "none" is the farmers
+   * nobody registered — the ones added from this dashboard.
+   *
+   * Replaced the filter on `agronomist` (who looks after them now). The two
+   * differ for any farmer who was reassigned, and this is the one that answers
+   * "who brought this farmer in".
+   */
+  const [onboardedByFilter, setOnboardedByFilter] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +60,10 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     name: "",
     mobile: "",
     agronomistId: "",
+    // The day we want the assigned agronomist to visit — yyyy-mm-dd, straight
+    // from <input type="date">. Not the same as `dop`, which is the crop's
+    // planting date.
+    visitDate: "",
     crop: "",
     variety: "",
     dop: "",
@@ -65,7 +77,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     try {
       const data =
         role === "farmer"
-          ? await api.listFarmers({ agronomist: agroFilter, from, to })
+          ? await api.listFarmers({ onboardedBy: onboardedByFilter, from, to })
           : await api.listAgronomists({ from, to });
       setPeople(data);
     } catch (e) {
@@ -80,14 +92,14 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     setPage(1);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, agroFilter]);
+  }, [from, to, onboardedByFilter]);
 
   useEffect(() => {
     setPage(1);
     setQuery("");
     setFrom("");
     setTo("");
-    setAgroFilter("");
+    setOnboardedByFilter("");
     load();
     // The agronomist list feeds both the filter and the Add-farmer dropdown.
     api.listAgronomists().then(setAgronomists).catch(() => {});
@@ -96,7 +108,15 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   }, [role]);
 
   const openAdd = () => {
-    setForm({ name: "", mobile: "", agronomistId: "", crop: "", variety: "", dop: "" });
+    setForm({
+      name: "",
+      mobile: "",
+      agronomistId: "",
+      visitDate: "",
+      crop: "",
+      variety: "",
+      dop: "",
+    });
     setFormError(null);
     setAdding(true);
   };
@@ -113,6 +133,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
         name: form.name,
         mobile: form.mobile,
         agronomistId: form.agronomistId || null,
+        // Meaningless without someone to do the visiting, so it only goes up
+        // when an agronomist was actually picked.
+        visitDate: (form.agronomistId && form.visitDate) || null,
         crop: form.crop || undefined,
         variety: form.variety || undefined,
         dop: form.dop || null,
@@ -185,14 +208,14 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
       <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100 px-3 py-2 text-sm dark:border-zinc-800">
         {showDetail && (
           <>
-            <span className="text-zinc-500">Agronomist</span>
+            <span className="text-zinc-500">Onboarded by</span>
             <select
-              value={agroFilter}
-              onChange={(e) => setAgroFilter(e.target.value)}
+              value={onboardedByFilter}
+              onChange={(e) => setOnboardedByFilter(e.target.value)}
               className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
             >
               <option value="">All</option>
-              <option value="none">— Unassigned —</option>
+              <option value="none">— Added from dashboard —</option>
               {agronomists.map((a) => (
                 <option key={a._id} value={a._id}>
                   {a.name}
@@ -228,12 +251,12 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           >
             Today
           </button>
-        {(from || to || agroFilter) && (
+        {(from || to || onboardedByFilter) && (
           <button
             onClick={() => {
               setFrom("");
               setTo("");
-              setAgroFilter("");
+              setOnboardedByFilter("");
             }}
             className="rounded-lg px-2.5 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
           >
@@ -261,6 +284,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               {showDetail && (
                 <th className="whitespace-nowrap px-4 py-3 font-semibold">Recording</th>
               )}
+              {showDetail && <th className="px-4 py-3 font-semibold">Follow up</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Status</th>}
               {showDetail && <th className="px-4 py-3 font-semibold text-right">Details</th>}
               {showCounts && <th className="px-4 py-3 font-semibold">Onboarded</th>}
@@ -342,6 +366,101 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                       ) : (
                         <span className="text-xs text-zinc-400">—</span>
                       )}
+                    </td>
+                  )}
+                  {/*
+                    What the field agent did about this farmer, in one cell.
+                    Read in priority order: a date still pending is work owed
+                    and outranks anything already finished, a skip explains an
+                    absence, and a completed follow-up is only worth showing
+                    once nothing is outstanding.
+                  */}
+                  {showDetail && (
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const fmt = (d: string) =>
+                          new Date(d).toLocaleDateString(undefined, {
+                            day: "numeric",
+                            month: "short",
+                          });
+
+                        if (p.nextFollowUpAt) {
+                          const due = new Date(p.nextFollowUpAt);
+                          const today = new Date();
+                          today.setHours(23, 59, 59, 999);
+                          const overdue = due.getTime() < today.getTime() - 86_400_000;
+                          // A farmer who has been visited leads with that: the
+                          // badge answers "did the agent go?", and the next date
+                          // is the follow-on. Without the visit shown, this cell
+                          // reads the same whether they went or not.
+                          const visited = p.lastVisitedAt;
+                          return (
+                            <div className="min-w-0">
+                              <span
+                                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${
+                                  visited
+                                    ? "bg-green-100 text-green-800 dark:bg-green-950/50 dark:text-green-300"
+                                    : overdue
+                                      ? "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300"
+                                      : "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+                                }`}
+                              >
+                                <span
+                                  className={`h-1.5 w-1.5 rounded-full ${
+                                    visited
+                                      ? "bg-green-600"
+                                      : overdue
+                                        ? "bg-red-600"
+                                        : "bg-blue-600"
+                                  }`}
+                                />
+                                {visited
+                                  ? `Visited ${fmt(visited)}`
+                                  : `${overdue ? "Overdue" : "Due"} ${fmt(p.nextFollowUpAt)}`}
+                              </span>
+                              <div className="mt-1 max-w-[16rem] text-xs text-zinc-500">
+                                <span className={overdue && visited ? "text-red-600" : undefined}>
+                                  Next {fmt(p.nextFollowUpAt)}
+                                  {overdue && visited ? " · overdue" : ""}
+                                </span>
+                                {p.followUpNote ? (
+                                  <span className="block truncate" title={p.followUpNote}>
+                                    {p.followUpNote}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        if (p.skippedAt) {
+                          return (
+                            <div className="min-w-0">
+                              <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                Not needed
+                              </span>
+                              <div
+                                className="mt-1 max-w-[16rem] truncate text-xs text-zinc-500"
+                                title={p.skipReason || undefined}
+                              >
+                                {p.skipReason || "No reason given"}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        if (p.lastFollowUpDoneAt) {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-800 dark:bg-green-950/50 dark:text-green-300">
+                              <span className="h-1.5 w-1.5 rounded-full bg-green-600" />
+                              Done {fmt(p.lastFollowUpDoneAt)}
+                            </span>
+                          );
+                        }
+
+                        return <span className="text-xs text-zinc-400">—</span>;
+                      })()}
                     </td>
                   )}
                   {showDetail && (
@@ -482,6 +601,27 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                 </option>
               ))}
             </select>
+
+            {/*
+              Only offered once an agronomist is picked — a visit day with
+              nobody to do the visiting is not a thing we can ask for, and the
+              submit handler drops it in that case anyway.
+            */}
+            {form.agronomistId && (
+              <>
+                <label className="mb-1 mt-3 block text-sm text-zinc-500">Visit by (optional)</label>
+                <input
+                  type="date"
+                  value={form.visitDate}
+                  onChange={(e) => setForm((f) => ({ ...f, visitDate: e.target.value }))}
+                  className="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+                />
+                <p className="mt-1 text-xs text-zinc-500">
+                  Shows against this farmer in the agronomist&apos;s Dashboard tab under Farm
+                  Visits.
+                </p>
+              </>
+            )}
 
             <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
               <p className="mb-2 text-sm font-medium">First crop (optional)</p>

@@ -20,6 +20,31 @@ export type Person = {
   agronomist?: { _id: string; name: string; mobile: string } | null;
   /** The agronomist who registered this farmer. Null = added from the dashboard. */
   onboardedBy?: { _id: string; name: string; mobile: string } | null;
+  /**
+   * The day we want this farmer visited. Shows against them in the app's
+   * Dashboard tab under Farm Visits. Null when no date was set. Farmers only.
+   */
+  visitDate?: string | null;
+  /**
+   * What the field agent decided about this farmer on their last visit.
+   *
+   * `nextFollowUpAt` is when they said they would come back, and is cleared by
+   * the next visit — so a date sitting here is work still owed. `skippedAt` is
+   * the opposite: the agent looked at the row and decided no trip was needed,
+   * and `skipReason` is why. Farmers only.
+   */
+  nextFollowUpAt?: string | null;
+  followUpNote?: string;
+  skippedAt?: string | null;
+  skipReason?: string;
+  /**
+   * When a follow-up that was actually owed got done. Only set if a date was
+   * pending when the visit was marked, so it means "came back as promised"
+   * rather than merely "was visited at some point".
+   */
+  lastFollowUpDoneAt?: string | null;
+  /** When this farmer was last visited, follow-up or not. */
+  lastVisitedAt?: string | null;
   createdAt: string;
   /** Corners in the farm boundary; 0 when none drawn yet. Farmers only. */
   geofenceCount?: number;
@@ -374,10 +399,23 @@ export const api = {
     }),
 
   // Users
-  // `agronomist` ('none' for unassigned) and `from`/`to` (yyyy-mm-dd) filter server-side.
-  listFarmers: (opts?: { agronomist?: string; from?: string; to?: string }) => {
+  /**
+   * Farmers, filtered server-side.
+   *
+   * `agronomist` ('none' for unassigned) is who looks after them now;
+   * `onboardedBy` ('none' for added from the dashboard) is who registered them
+   * in the field. `from`/`to` are yyyy-mm-dd on the registration date.
+   */
+  listFarmers: (opts?: {
+    agronomist?: string;
+    onboardedBy?: string;
+    from?: string;
+    to?: string;
+  }) => {
     const q = new URLSearchParams();
     if (opts?.agronomist) q.set("agronomist", opts.agronomist);
+    // "none" means nobody registered them in the field — added from here.
+    if (opts?.onboardedBy) q.set("onboardedBy", opts.onboardedBy);
     if (opts?.from) q.set("from", opts.from);
     if (opts?.to) q.set("to", opts.to);
     const qs = q.toString();
@@ -390,6 +428,8 @@ export const api = {
     crop?: string;
     variety?: string;
     dop?: string | null;
+    /** yyyy-mm-dd — the day the assigned agronomist should visit. */
+    visitDate?: string | null;
   }) => json<Person>("/api/users/farmers", { method: "POST", body: JSON.stringify(body) }),
   updateFarmer: (id: string, body: { name?: string; mobile?: string }) =>
     json<Person>(`/api/users/farmers/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
@@ -403,10 +443,17 @@ export const api = {
     return json<Person[]>(`/api/users/agronomists${qs ? `?${qs}` : ""}`);
   },
   getUser: (id: string) => json<Person & { role: string }>(`/api/users/${id}`),
-  assignAgronomist: (farmerId: string, agronomistId: string | null) =>
+  /**
+   * Assign (or unassign, with null) a farmer's agronomist.
+   *
+   * `visitDate` is only sent when given: omitting it leaves any date already on
+   * the farmer alone, whereas passing "" clears it. Unassigning clears it
+   * server-side regardless — a visit day with nobody to do it means nothing.
+   */
+  assignAgronomist: (farmerId: string, agronomistId: string | null, visitDate?: string | null) =>
     json<Person>(`/api/users/${farmerId}/agronomist`, {
       method: "PATCH",
-      body: JSON.stringify({ agronomistId }),
+      body: JSON.stringify(visitDate === undefined ? { agronomistId } : { agronomistId, visitDate }),
     }),
   listUserCrops: (userId: string) => json<Crop[]>(`/api/users/${userId}/crops`),
   addUserCrop: (

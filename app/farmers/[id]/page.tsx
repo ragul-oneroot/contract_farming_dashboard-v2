@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Phone, MapPin, Sprout, ShoppingCart, UserCog, Map as MapIcon, Camera, ClipboardCheck, Pencil, Plus, Trash2, X, Mic } from "lucide-react";
+import { ArrowLeft, Phone, MapPin, Sprout, ShoppingCart, UserCog, Map as MapIcon, Camera, ClipboardCheck, Pencil, Plus, Trash2, X, Mic, CalendarClock, Ban } from "lucide-react";
 import {
   api,
   CatalogCrop,
@@ -298,6 +298,85 @@ export default function FarmerDetailPage() {
           ))}
         </select>
       </div>
+
+      {/*
+        What the field decided about this farmer. Shown here because the
+        dashboard's own view of a farmer is otherwise silent on it: an admin
+        looking at a row has no way of telling whether nobody has visited or
+        somebody visited and judged nothing was needed.
+      */}
+      {farmer?.nextFollowUpAt || farmer?.skippedAt ? (
+        <section>
+          <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+            <CalendarClock size={18} className="text-green-600" /> Follow-up
+          </h2>
+          <div className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+            {farmer.nextFollowUpAt ? (
+              (() => {
+                const due = new Date(farmer.nextFollowUpAt);
+                const endOfToday = new Date();
+                endOfToday.setHours(23, 59, 59, 999);
+                const overdue = due.getTime() < endOfToday.getTime() - 86_400_000;
+                return (
+                  <div className="flex items-start gap-3">
+                    <span
+                      className={`mt-0.5 rounded-md p-1.5 ${
+                        overdue
+                          ? "bg-red-50 text-red-600 dark:bg-red-950/40"
+                          : "bg-green-50 text-green-600 dark:bg-green-950/30"
+                      }`}
+                    >
+                      <CalendarClock size={15} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium">
+                        Next visit due{" "}
+                        {due.toLocaleDateString(undefined, {
+                          weekday: "short",
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                        {overdue ? (
+                          <span className="ml-2 rounded bg-red-50 px-1.5 py-0.5 text-xs font-semibold text-red-600 dark:bg-red-950/40">
+                            Overdue
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="text-xs text-zinc-500">
+                        {farmer.followUpNote
+                          ? farmer.followUpNote
+                          : "No reason recorded"}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : null}
+
+            {farmer.skippedAt ? (
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 rounded-md bg-amber-50 p-1.5 text-amber-600 dark:bg-amber-950/40">
+                  <Ban size={15} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">
+                    Marked as needing no visit on{" "}
+                    {new Date(farmer.skippedAt).toLocaleDateString(undefined, {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    {farmer.skipReason || "No reason recorded"}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {/* The conversation recorded while this farmer was being onboarded. */}
       {farmer?.onboardingAudioUrl ? (
