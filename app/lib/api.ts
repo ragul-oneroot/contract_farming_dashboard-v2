@@ -344,6 +344,20 @@ export type TrackPoint = {
   accuracy?: number | null;
 };
 
+/**
+ * A stretch the agent stepped out of the working day — lunch, an errand, a
+ * breakdown. Recording stops, and the distance covered in between is left out
+ * of the day's total, so each one carries a reason and a photo.
+ *
+ * `resumedAt` is null while the pause is still running.
+ */
+export type TrackingPause = {
+  pausedAt: string;
+  resumedAt: string | null;
+  reason: string;
+  photoUrl?: string;
+};
+
 /** A tracked work day: START to END, with the route walked in between. */
 export type TrackingSession = {
   _id: string;
@@ -357,6 +371,8 @@ export type TrackingSession = {
   endAt: string | null;
   startPhotoUrl: string;
   endPhotoUrl: string;
+  /** Stretches the agent stepped out of the day. Absent on older sessions. */
+  pauses?: TrackingPause[];
   /** Only the single-session fetch carries the route; the list omits it. */
   points?: TrackPoint[];
   distanceKm: number;

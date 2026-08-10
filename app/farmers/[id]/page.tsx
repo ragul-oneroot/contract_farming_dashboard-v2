@@ -54,6 +54,51 @@ function dayNumber(dop: string | null) {
   return Math.floor((Date.now() - new Date(dop).getTime()) / DAY_MS) + 1;
 }
 
+/**
+ * How this crop entered its schedule.
+ *
+ * A crop registered the day it was sown follows the Package of Practices from
+ * step one. A crop sown weeks earlier and registered later joins partway
+ * through, and every step whose day had already passed was never recorded —
+ * not skipped by the agent, simply never seen. The two look identical on a
+ * progress bar, which is why they are spelled out here.
+ */
+function dopStory(
+  crop: { dop: string | null; createdAt: string },
+  pop: PackageOfPractices | undefined
+) {
+  if (!crop.dop) return null;
+  const planted = new Date(crop.dop);
+  const registered = new Date(crop.createdAt);
+  if (Number.isNaN(planted.getTime()) || Number.isNaN(registered.getTime())) return null;
+
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const plantedAgo = Math.floor((day(new Date()) - day(planted)) / DAY_MS);
+  // How far into the cycle the crop already was on the day it was registered.
+  const dayAtRegistration = Math.floor((day(registered) - day(planted)) / DAY_MS) + 1;
+
+  // Steps whose scheduled day had already gone by before anyone was watching.
+  const missed = pop
+    ? pop.steps.filter((st) => st.day[1] < dayAtRegistration).length
+    : 0;
+  const joinedAt = pop
+    ? pop.steps.findIndex((st) => st.day[1] >= dayAtRegistration) + 1
+    : 0;
+
+  return {
+    planted,
+    registered,
+    plantedAgo,
+    dayAtRegistration,
+    missed,
+    joinedAt,
+    // A day or less between sowing and registering is "from the start" — an
+    // agent registering the same afternoon should not read as having missed
+    // anything.
+    fromStart: dayAtRegistration <= 1,
+  };
+}
+
 // Current POP stage + progress for a crop, given its schedule and day count.
 function stageInfo(pop: PackageOfPractices | undefined, dayN: number | null) {
   if (!pop) return { stage: "No schedule available", stepNo: 0, total: 0, pct: 0 };
@@ -458,6 +503,7 @@ export default function FarmerDetailPage() {
               const pop = pops[crop.name.toLowerCase()];
               const dayN = dayNumber(crop.dop);
               const info = stageInfo(pop, dayN);
+              const story = dopStory(crop, pop);
               const doneCount = (crop.progress ?? []).filter((p) => p.done).length;
               return (
                 <div
@@ -495,6 +541,76 @@ export default function FarmerDetailPage() {
                     </span>
                     <span>{info.pct}%</span>
                   </div>
+
+                  {/* What happened around the planting date. */}
+                  {story ? (
+                    <div className="mt-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Planting timeline
+                        </span>
+                        {story.fromStart ? (
+                          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-950/50 dark:text-green-300">
+                            Followed from the start
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                            Started mid-schedule
+                          </span>
+                        )}
+                      </div>
+
+                      <ol className="space-y-1.5 text-sm">
+                        <li className="flex items-start gap-2">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-600" />
+                          <span>
+                            <b>Sown</b> {fmtDate(crop.dop)}
+                            <span className="text-zinc-500">
+                              {" "}
+                              · {story.plantedAgo} day{story.plantedAgo === 1 ? "" : "s"} ago
+                            </span>
+                          </span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" />
+                          <span>
+                            <b>Registered</b> {fmtDate(crop.createdAt)}
+                            {story.fromStart ? (
+                              <span className="text-zinc-500"> · same day as sowing</span>
+                            ) : (
+                              <span className="text-zinc-500">
+                                {" "}
+                                · {story.dayAtRegistration - 1} day
+                                {story.dayAtRegistration - 1 === 1 ? "" : "s"} after sowing, so the
+                                crop was already on day {story.dayAtRegistration} of its cycle
+                              </span>
+                            )}
+                          </span>
+                        </li>
+                        {!story.fromStart && pop ? (
+                          <li className="flex items-start gap-2">
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+                            <span>
+                              <b>Joined the schedule</b> at step {Math.max(story.joinedAt, 1)} of{" "}
+                              {pop.steps.length}
+                              {story.missed > 0 ? (
+                                <span className="text-zinc-500">
+                                  {" "}
+                                  · {story.missed} earlier step
+                                  {story.missed === 1 ? "" : "s"} fell before registration and were
+                                  never recorded
+                                </span>
+                              ) : null}
+                            </span>
+                          </li>
+                        ) : null}
+                      </ol>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-dashed border-amber-300 p-3 text-sm text-amber-700 dark:border-amber-900 dark:text-amber-400">
+                      No planting date set — the schedule cannot be counted until one is.
+                    </div>
+                  )}
 
                   {/* Current stage + tasks */}
                   <div className="mt-3 grid grid-cols-2 gap-3">

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Navigation, Clock, MapPin, X, CloudRain } from "lucide-react";
-import { api, Person, TrackingSession } from "../lib/api";
+import { Navigation, Clock, MapPin, X, CloudRain, PauseCircle } from "lucide-react";
+import { api, Person, TrackingPause, TrackingSession } from "../lib/api";
 import { PhotoThumb } from "../components/lightbox";
 
 function fmtDateTime(s: string) {
@@ -21,6 +21,19 @@ function fmtTime(s: string) {
 function duration(from: string, to: string | null) {
   const mins = Math.max(0, Math.round(((to ? new Date(to) : new Date()).getTime() - new Date(from).getTime()) / 60000));
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+function mins(from: string, to: string | null) {
+  return Math.max(0, Math.round(((to ? new Date(to) : new Date()).getTime() - new Date(from).getTime()) / 60000));
+}
+
+function hm(m: number) {
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+}
+
+/** Minutes the agent was stepped out of the day. An open pause runs to now. */
+function pausedMinutes(pauses: TrackingPause[] | undefined) {
+  return (pauses || []).reduce((t, p) => t + mins(p.pausedAt, p.resumedAt), 0);
 }
 
 /**
@@ -221,7 +234,7 @@ export default function TrackingPage() {
         </p>
       ) : (
         <div className="overflow-x-auto card">
-          <table className="w-full min-w-[900px] text-sm">
+          <table className="w-full min-w-[1100px] text-sm">
             <thead>
               <tr className="border-b border-zinc-200 text-left text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
                 <th className="px-4 py-3 font-medium">Agent</th>
@@ -229,6 +242,7 @@ export default function TrackingPage() {
                 <th className="px-4 py-3 font-medium">Ended</th>
                 <th className="px-4 py-3 font-medium">Duration</th>
                 <th className="px-4 py-3 font-medium">Distance</th>
+                <th className="px-4 py-3 font-medium">Pauses</th>
                 <th className="px-4 py-3 font-medium">Photos</th>
                 <th className="px-4 py-3 font-medium">Route</th>
               </tr>
@@ -238,6 +252,8 @@ export default function TrackingPage() {
                 // A declared day in has no route or distance — it has a reason,
                 // and showing it as "0 km" would read as a failure to work.
                 const off = s.kind === "no_field";
+                const pauses = s.pauses || [];
+                const paused = pausedMinutes(pauses);
                 const shots = [
                   { url: s.startPhotoUrl, label: off ? "Reason" : "Start" },
                   { url: s.endPhotoUrl, label: "End" },
@@ -264,9 +280,19 @@ export default function TrackingPage() {
                       {off ? (
                         "—"
                       ) : (
-                        <span className="inline-flex items-center gap-1">
-                          <Clock size={13} /> {duration(s.startAt, s.endAt)}
-                        </span>
+                        <div>
+                          <span className="inline-flex items-center gap-1">
+                            <Clock size={13} /> {duration(s.startAt, s.endAt)}
+                          </span>
+                          {/* Elapsed time hides the gap. Spell out how much of
+                              it the agent was actually out of the day for. */}
+                          {paused > 0 ? (
+                            <div className="text-xs text-amber-600 dark:text-amber-500">
+                              {hm(Math.max(0, mins(s.startAt, s.endAt) - paused))} working ·{" "}
+                              {hm(paused)} paused
+                            </div>
+                          ) : null}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -279,6 +305,50 @@ export default function TrackingPage() {
                         </div>
                       ) : (
                         <span className="font-semibold text-green-600">{s.distanceKm} km</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {off ? (
+                        <span className="text-xs text-zinc-400">—</span>
+                      ) : pauses.length === 0 ? (
+                        <span className="text-xs text-zinc-400">None</span>
+                      ) : (
+                        <div className="max-w-[300px] space-y-2">
+                          {pauses.map((p, i) => (
+                            <div key={`${p.pausedAt}-${i}`} className="flex items-start gap-2">
+                              {p.photoUrl ? (
+                                <PhotoThumb
+                                  url={p.photoUrl}
+                                  caption={`Paused ${fmtTime(p.pausedAt)} — ${p.reason || "no reason given"}`}
+                                  group={pauses
+                                    .filter((x) => x.photoUrl)
+                                    .map((x) => ({
+                                      url: x.photoUrl as string,
+                                      caption: `Paused ${fmtTime(x.pausedAt)} — ${x.reason || "no reason given"}`,
+                                    }))}
+                                  index={pauses.filter((x) => x.photoUrl).indexOf(p)}
+                                  alt="Where the agent paused"
+                                  className="h-10 w-10 shrink-0 rounded-md object-cover ring-1 ring-amber-200 hover:ring-amber-500 dark:ring-amber-900"
+                                />
+                              ) : (
+                                <PauseCircle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                              )}
+                              <div className="min-w-0">
+                                <div className="text-xs font-medium text-amber-700 dark:text-amber-500">
+                                  {fmtTime(p.pausedAt)}
+                                  {p.resumedAt ? (
+                                    <> – {fmtTime(p.resumedAt)} · {hm(mins(p.pausedAt, p.resumedAt))}</>
+                                  ) : (
+                                    <> · still paused</>
+                                  )}
+                                </div>
+                                <div className="text-xs text-zinc-600 dark:text-zinc-300">
+                                  {p.reason || "No reason given"}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -333,6 +403,14 @@ export default function TrackingPage() {
                   <div className="text-xs text-zinc-500">
                     {fmtDateTime(open.startAt)} · {duration(open.startAt, open.endAt)} ·{" "}
                     {open.distanceKm} km · {open.points?.length ?? 0} points
+                    {pausedMinutes(open.pauses) > 0 ? (
+                      // The route will show a jump here. Say why, so the gap is
+                      // not read as the tracking having failed.
+                      <span className="text-amber-600 dark:text-amber-500">
+                        {" "}
+                        · {hm(pausedMinutes(open.pauses))} paused (not counted)
+                      </span>
+                    ) : null}
                   </div>
                 )}
               </div>
