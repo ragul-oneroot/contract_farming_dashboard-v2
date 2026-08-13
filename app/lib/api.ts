@@ -21,6 +21,11 @@ export type Person = {
   /** The agronomist who registered this farmer. Null = added from the dashboard. */
   onboardedBy?: { _id: string; name: string; mobile: string } | null;
   /**
+   * The FPO this farmer belongs to, chosen at onboarding from the FPOs
+   * agronomists have registered. Null when none was recorded. Farmers only.
+   */
+  fpo?: { _id: string; name: string; mobile: string } | null;
+  /**
    * The day we want this farmer visited. Shows against them in the app's
    * Dashboard tab under Farm Visits. Null when no date was set. Farmers only.
    */
@@ -318,6 +323,48 @@ export type DiseaseReply = {
 };
 
 /** A crop a field agent photographed and sent up for advice. */
+/**
+ * A Farmer Producer Organisation onboarded by a field agent.
+ *
+ * `agronomist` is the id only — the backend does not populate it here, so the
+ * page resolves names against the agronomist list it already loads.
+ */
+export type Fpo = {
+  _id: string;
+  name: string;
+  mobile: string;
+  role: string;
+  photoUrl: string;
+  /** Other people at the same FPO. Empty when only one contact was taken. */
+  members?: { name: string; mobile: string; designation: string }[];
+  crops: string[];
+  /** As stated by the FPO on the day. A claim, not a figure we can verify. */
+  farmerCount: number;
+  location: { latitude: number | null; longitude: number | null };
+  /**
+   * Whether the pin is where the agent stood ("gps") or a place they searched
+   * for ("search"). Only a GPS pin is evidence of where the agent was.
+   */
+  locationSource?: "gps" | "search" | "";
+  /** Reverse-geocoded from `location`, never typed — so it groups reliably. */
+  address?: FarmAddress;
+  agronomist: string | null;
+  createdAt: string;
+};
+
+/**
+ * One page of FPOs. `total` and `totals` describe the whole filtered set, so
+ * the footer figures do not grow as the user pages through.
+ */
+export type FpoPage = {
+  items: Fpo[];
+  total: number;
+  totals: { farmers: number };
+  page: number;
+  limit: number;
+  hasMore: boolean;
+};
+
 export type DiseaseReport = {
   _id: string;
   reporter: { _id: string; name: string; mobile: string; role: string } | null;
@@ -528,6 +575,58 @@ export const api = {
   // Crops reported as diseased, and the advice sent back.
   listDiseaseReports: (status?: "open" | "answered") =>
     json<DiseaseReport[]>(`/api/disease-reports${status ? `?status=${status}` : ""}`),
+
+  // FPOs onboarded by field agents. `search` covers only the names and numbers
+  // of everyone on the record; role, crop and area are separate filters.
+  listFpos: (params?: {
+    search?: string;
+    role?: string;
+    crop?: string;
+    agronomist?: string;
+    district?: string;
+    taluk?: string;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.search) q.set("search", params.search);
+    if (params?.role) q.set("role", params.role);
+    if (params?.crop) q.set("crop", params.crop);
+    if (params?.agronomist) q.set("agronomist", params.agronomist);
+    if (params?.district) q.set("district", params.district);
+    if (params?.taluk) q.set("taluk", params.taluk);
+    const qs = q.toString();
+    return json<Fpo[]>(`/api/fpos${qs ? `?${qs}` : ""}`);
+  },
+
+  /**
+   * The same list, a page at a time. `total` and `totals` cover everything the
+   * filters match, not just the page, so the footer can state real figures
+   * without the dashboard holding every row.
+   */
+  listFposPage: (params: {
+    search?: string;
+    role?: string;
+    crop?: string;
+    agronomist?: string;
+    district?: string;
+    taluk?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.search) q.set("search", params.search);
+    if (params.role) q.set("role", params.role);
+    if (params.crop) q.set("crop", params.crop);
+    if (params.agronomist) q.set("agronomist", params.agronomist);
+    if (params.district) q.set("district", params.district);
+    if (params.taluk) q.set("taluk", params.taluk);
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    q.set("page", String(params.page ?? 1));
+    q.set("limit", String(params.limit ?? 12));
+    return json<FpoPage>(`/api/fpos?${q.toString()}`);
+  },
 
   // Tracked work days. The list omits routes — they are thousands of points each.
   listTracking: (params?: { userId?: string; from?: string; to?: string }) => {

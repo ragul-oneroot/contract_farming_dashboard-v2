@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { LayoutDashboard, Users, UserCog, Sprout, Package, Phone, ClipboardList, MapPin, LogOut, ChevronLeft, Leaf, ShieldCheck, ShoppingBag, Navigation, Bug } from "lucide-react";
+import { LayoutDashboard, Users, UserCog, Sprout, Package, Phone, ClipboardList, MapPin, LogOut, ChevronLeft, Leaf, ShieldCheck, ShoppingBag, Navigation, Bug, Building2 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/farmers", label: "Farmers", icon: Users },
+  { href: "/fpos", label: "FPOs", icon: Building2 },
   { href: "/agronomists", label: "Agronomists", icon: UserCog },
   { href: "/crops", label: "Crops", icon: Sprout },
   { href: "/products", label: "Products", icon: Package },
@@ -24,6 +25,7 @@ const NAV = [
 const TITLES: Record<string, string> = {
   "/": "Dashboard",
   "/farmers": "Farmers",
+  "/fpos": "Farmer Producer Organisations",
   "/agronomists": "Agronomists",
   "/crops": "Crops & Package of Practices",
   "/products": "Products",

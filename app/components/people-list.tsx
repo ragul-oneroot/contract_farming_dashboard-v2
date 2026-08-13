@@ -31,7 +31,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
   // Agronomists get Onboarded / Assigned counts instead of the farmer-only columns.
   const showCounts = role === "agronomist";
-  const colCount = showDetail ? 13 : 6;
+  const colCount = showDetail ? 14 : 6;
 
   // Filters. On farmers these narrow the rows; on agronomists they narrow the
   // onboarded/assigned counts.
@@ -279,6 +279,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               {showDetail && <th className="px-4 py-3 font-semibold">District</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Taluk</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Village</th>}
+              {showDetail && <th className="px-4 py-3 font-semibold">FPO</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Agronomist</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Onboarded by</th>}
               {showDetail && (
@@ -329,6 +330,29 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                   {showDetail && <td className="px-4 py-3">{p.farmAddress?.district || <NoFarm />}</td>}
                   {showDetail && <td className="px-4 py-3">{p.farmAddress?.taluk || <NoFarm />}</td>}
                   {showDetail && <td className="px-4 py-3">{p.farmAddress?.village || <NoFarm />}</td>}
+                  {showDetail && (
+                    <td className="px-4 py-3">
+                      {p.fpo ? (
+                        <div className="leading-tight">
+                          <div className="font-medium">{p.fpo.name}</div>
+                          {/* The number, because "which FPO" is usually asked
+                              right before somebody rings them. */}
+                          {p.fpo.mobile ? (
+                            <a
+                              href={`tel:${p.fpo.mobile}`}
+                              className="text-xs text-zinc-500 hover:text-green-600"
+                            >
+                              {p.fpo.mobile}
+                            </a>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-zinc-400" title="No FPO recorded at onboarding">
+                          —
+                        </span>
+                      )}
+                    </td>
+                  )}
                   {showDetail && (
                     <td className="px-4 py-3">
                       {p.agronomist ? (
