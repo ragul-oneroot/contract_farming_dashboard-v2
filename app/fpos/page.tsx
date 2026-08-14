@@ -11,7 +11,7 @@ import {
 import { api, Fpo, Person } from "../lib/api";
 import { PhotoThumb } from "../components/lightbox";
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 20;
 
 /**
  * The area is reverse-geocoded from where the record was pinned, so it is
@@ -326,9 +326,16 @@ export default function FposPage() {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto">
+      {/* Fixed height with the header pinned: twenty rows plus filters and a
+          footer otherwise push the pager off the bottom of the screen, and
+          scrolling the page to reach it loses the column names on the way.
+          Capped against the viewport rather than a pixel count, so a laptop
+          and a large monitor both fill what they have. The 19rem reserved is
+          the chrome above and below — header, toolbar, filters and pager — and
+          little enough beyond that to keep the pager on screen. */}
+      <div className="max-h-[calc(100vh-19rem)] min-h-[24rem] overflow-auto">
         <table className="w-full min-w-[1180px] text-left text-sm">
-          <thead className="bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-300">
+          <thead className="sticky top-0 z-10 bg-green-50 text-green-800 [&>tr>th]:bg-green-50 dark:bg-green-950 dark:text-green-300 dark:[&>tr>th]:bg-green-950">
             <tr>
               <th className="px-4 py-3 font-semibold">Name</th>
               <th className="px-4 py-3 font-semibold">Onboarded at</th>

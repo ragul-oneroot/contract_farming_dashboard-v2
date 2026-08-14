@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Navigation, Clock, MapPin, X, CloudRain, PauseCircle } from "lucide-react";
+import { Navigation, Clock, MapPin, X, CloudRain, PauseCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, Person, TrackingPause, TrackingSession } from "../lib/api";
 import { PhotoThumb } from "../components/lightbox";
 
@@ -109,8 +109,14 @@ function RouteMap({ session }: { session: TrackingSession }) {
   return <iframe srcDoc={html} className="h-full w-full border-0" sandbox="allow-scripts" />;
 }
 
+const PAGE_SIZE = 20;
+
 export default function TrackingPage() {
   const [sessions, setSessions] = useState<TrackingSession[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  /** Server-computed, so they cover the whole period rather than this page. */
+  const [totals, setTotals] = useState({ km: 0, hours: 0, tracked: 0, live: 0, off: 0 });
   const [agents, setAgents] = useState<Person[]>([]);
   const [who, setWho] = useState("");
   const [from, setFrom] = useState("");
@@ -125,17 +131,30 @@ export default function TrackingPage() {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      api.listTracking({ userId: who || undefined, from: from || undefined }),
+      api.listTrackingPage({
+        userId: who || undefined,
+        from: from || undefined,
+        page,
+        limit: PAGE_SIZE,
+      }),
       api.listAgronomists().catch(() => [] as Person[]),
     ])
-      .then(([s, a]) => {
-        setSessions(s);
+      .then(([res, a]) => {
+        setSessions(res.items);
+        setTotal(res.total);
+        setTotals(res.totals);
         setAgents(a);
         setError(null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load tracking"))
       .finally(() => setLoading(false));
-  }, [who, from]);
+  }, [who, from, page]);
+
+  /** Changing agent or date must land on page one of the new results. */
+  const applyFilter = (set: (v: string) => void) => (value: string) => {
+    set(value);
+    setPage(1);
+  };
 
   const showRoute = async (id: string) => {
     setOpenLoading(true);
@@ -148,35 +167,18 @@ export default function TrackingPage() {
     }
   };
 
-  const totals = useMemo(() => {
-    // Declared days in are not tracked days: counting them would drag the
-    // averages down and imply the agent worked a zero-kilometre shift.
-    const tracked = sessions.filter((s) => s.kind !== "no_field");
-    const km = tracked.reduce((s, x) => s + (x.distanceKm || 0), 0);
-    const mins = tracked.reduce(
-      (s, x) => s + ((x.endAt ? new Date(x.endAt) : new Date()).getTime() - new Date(x.startAt).getTime()) / 60000,
-      0
-    );
-    return {
-      km: Math.round(km * 10) / 10,
-      hours: Math.round(mins / 6) / 10,
-      tracked: tracked.length,
-      live: tracked.filter((s) => !s.endAt).length,
-      off: sessions.length - tracked.length,
-    };
-  }, [sessions]);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Navigation size={20} className="text-green-600" />
-          <h2 className="text-lg font-semibold">Tracking ({sessions.length})</h2>
+          <h2 className="text-lg font-semibold">Tracking ({total})</h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={who}
-            onChange={(e) => setWho(e.target.value)}
+            onChange={(e) => applyFilter(setWho)(e.target.value)}
             className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           >
             <option value="">All agents</option>
@@ -189,7 +191,7 @@ export default function TrackingPage() {
           <input
             type="date"
             value={from}
-            onChange={(e) => setFrom(e.target.value)}
+            onChange={(e) => applyFilter(setFrom)(e.target.value)}
             className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
           {(who || from) && (
@@ -197,6 +199,7 @@ export default function TrackingPage() {
               onClick={() => {
                 setWho("");
                 setFrom("");
+                setPage(1);
               }}
               className="text-sm text-zinc-500 hover:underline"
             >
@@ -389,6 +392,35 @@ export default function TrackingPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Only worth showing once there is more than one page to move between. */}
+      {!loading && total > PAGE_SIZE && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-zinc-500">
+          <span>
+            Showing {(page - 1) * PAGE_SIZE + 1} to {Math.min(page * PAGE_SIZE, total)} of {total}{" "}
+            sessions
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded-lg border border-zinc-300 p-1.5 disabled:opacity-40 dark:border-zinc-700"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="px-2">
+              {page} / {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+            </span>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={page >= Math.ceil(total / PAGE_SIZE)}
+              className="rounded-lg border border-zinc-300 p-1.5 disabled:opacity-40 dark:border-zinc-700"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
         </div>
       )}
 

@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays } from "lucide-react";
 import { api, CatalogCrop, missingDetails, Person } from "../lib/api";
 import { AudioPlayer } from "./audio-player";
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 20;
 
 // District/Taluk/Village come from the farm boundary, so they're blank until the farmer draws
 // one. The tooltip says so — otherwise an empty cell reads like a bug.
@@ -50,6 +50,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  /** How many rows the current filters match in total, not just on this page. */
+  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
 
   // "Add farmer" form (farmers only).
@@ -71,15 +73,29 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  /**
+   * One page from the server, filters and search included.
+   *
+   * Both moved server-side together: filtering a page of twenty in the browser
+   * would silently drop every match sitting on the other pages.
+   */
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data =
+      const res =
         role === "farmer"
-          ? await api.listFarmers({ onboardedBy: onboardedByFilter, from, to })
-          : await api.listAgronomists({ from, to });
-      setPeople(data);
+          ? await api.listFarmersPage({
+              onboardedBy: onboardedByFilter,
+              search: query,
+              from,
+              to,
+              page,
+              limit: PAGE_SIZE,
+            })
+          : await api.listAgronomistsPage({ search: query, from, to, page, limit: PAGE_SIZE });
+      setPeople(res.items);
+      setTotal(res.total);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -87,12 +103,22 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     }
   };
 
-  // Reload whenever a filter moves.
-  useEffect(() => {
+  /**
+   * Every filter goes through here, so none can change without returning to
+   * page one. Staying on page 4 of a result set that now has two shows an
+   * empty table, which reads as "nothing matches" rather than "past the end".
+   */
+  const applyFilter = (set: (v: string) => void) => (value: string) => {
+    set(value);
     setPage(1);
-    load();
+  };
+
+  // Typing is debounced; page moves are not, so the request fires at once.
+  useEffect(() => {
+    const t = setTimeout(load, query ? 300 : 0);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, onboardedByFilter]);
+  }, [role, from, to, onboardedByFilter, query, page]);
 
   useEffect(() => {
     setPage(1);
@@ -100,11 +126,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     setFrom("");
     setTo("");
     setOnboardedByFilter("");
-    load();
     // The agronomist list feeds both the filter and the Add-farmer dropdown.
     api.listAgronomists().then(setAgronomists).catch(() => {});
     if (role === "farmer") api.listCropCatalog().then(setCatalog).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
   const openAdd = () => {
@@ -149,28 +173,12 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     }
   };
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return people;
-    // Place names are searchable too, so "Anekal" finds every farmer in that taluk.
-    return people.filter((p) =>
-      [
-        p.name,
-        p.mobile,
-        p.farmAddress?.district,
-        p.farmAddress?.taluk,
-        p.farmAddress?.village,
-        p.agronomist?.name,
-        p.onboardedBy?.name,
-      ].some((f) => f?.toLowerCase().includes(q))
-    );
-  }, [people, query]);
 
-  const total = filtered.length;
+  // The server decides what a page holds; these only place it in the whole.
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const current = Math.min(page, pageCount);
   const start = (current - 1) * PAGE_SIZE;
-  const rows = filtered.slice(start, start + PAGE_SIZE);
+  const rows = people;
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
@@ -186,11 +194,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input
             value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setPage(1);
-            }}
-            placeholder="Search by name or mobile number…"
+            onChange={(e) => applyFilter(setQuery)(e.target.value)}
+            placeholder="Search by name, number or place…"
             className="w-full rounded-lg border border-zinc-300 bg-transparent py-2 pl-9 pr-3 text-sm dark:border-zinc-700"
           />
         </div>
@@ -266,11 +271,18 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto">
+      {/* Fixed height with the header pinned: twenty rows plus filters and a
+          footer otherwise push the pager off the bottom of the screen, and
+          scrolling the page to reach it loses the column names on the way.
+          Capped against the viewport rather than a pixel count, so a laptop
+          and a large monitor both fill what they have. The 19rem reserved is
+          the chrome above and below — header, toolbar, filters and pager — and
+          little enough beyond that to keep the pager on screen. */}
+      <div className="max-h-[calc(100vh-19rem)] min-h-[24rem] overflow-auto">
         {/* Twelve columns including an inline player: below this the cells crush
             each other, so let the wrapper scroll instead. */}
         <table className={`w-full text-left text-sm ${showDetail ? "min-w-[1280px]" : ""}`}>
-          <thead className="bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-300">
+          <thead className="sticky top-0 z-10 bg-green-50 text-green-800 [&>tr>th]:bg-green-50 dark:bg-green-950 dark:text-green-300 dark:[&>tr>th]:bg-green-950">
             <tr>
               <th className="px-4 py-3 font-semibold">Name</th>
               <th className="px-4 py-3 font-semibold">Registered at</th>

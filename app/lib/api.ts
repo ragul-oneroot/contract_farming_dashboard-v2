@@ -356,6 +356,18 @@ export type Fpo = {
  * One page of FPOs. `total` and `totals` describe the whole filtered set, so
  * the footer figures do not grow as the user pages through.
  */
+/**
+ * One page of anything. `total` covers everything the filters match, not just
+ * `items`, so a footer count does not grow as the user pages through.
+ */
+export type Paged<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
+};
+
 export type FpoPage = {
   items: Fpo[];
   total: number;
@@ -484,6 +496,44 @@ export const api = {
     const qs = q.toString();
     return json<Person[]>(`/api/users/farmers${qs ? `?${qs}` : ""}`);
   },
+  /** Farmers a page at a time. Search and filters all applied server-side. */
+  listFarmersPage: (params: {
+    agronomist?: string;
+    onboardedBy?: string;
+    search?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.agronomist) q.set("agronomist", params.agronomist);
+    if (params.onboardedBy) q.set("onboardedBy", params.onboardedBy);
+    if (params.search) q.set("search", params.search);
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    q.set("page", String(params.page ?? 1));
+    q.set("limit", String(params.limit ?? 20));
+    return json<Paged<Person>>(`/api/users/farmers?${q.toString()}`);
+  },
+
+  /** Agronomists a page at a time. The farmer counts cover the given window. */
+  listAgronomistsPage: (params: {
+    search?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.search) q.set("search", params.search);
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    q.set("page", String(params.page ?? 1));
+    q.set("limit", String(params.limit ?? 20));
+    return json<Paged<Person>>(`/api/users/agronomists?${q.toString()}`);
+  },
+
   createFarmer: (body: {
     name: string;
     mobile: string;
@@ -558,6 +608,20 @@ export const api = {
 
   // Products
   listProducts: () => json<Product[]>("/api/products"),
+
+  /**
+   * Products a page at a time, searched on the server.
+   *
+   * Separate from `listProducts` above because several screens still want the
+   * whole catalogue for a dropdown, and sending `page` changes the shape.
+   */
+  listProductsPage: (params: { search?: string; page?: number; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params.search) q.set("search", params.search);
+    q.set("page", String(params.page ?? 1));
+    q.set("limit", String(params.limit ?? 20));
+    return json<Paged<Product>>(`/api/products?${q.toString()}`);
+  },
   createProduct: (data: FormData) => form<Product>("/api/products", "POST", data),
   updateProduct: (id: string, data: FormData) => form<Product>(`/api/products/${id}`, "PUT", data),
   deleteProduct: (id: string) =>
@@ -637,6 +701,33 @@ export const api = {
     const qs = q.toString();
     return json<TrackingSession[]>(`/api/tracking${qs ? `?${qs}` : ""}`);
   },
+  /**
+   * Tracking a page at a time. `totals` covers every session the filters
+   * match, not just the page — distance and hours describe a period, and a
+   * figure that grew while paging would describe nothing at all.
+   */
+  listTrackingPage: (params: {
+    userId?: string;
+    search?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.userId) q.set("user", params.userId);
+    if (params.search) q.set("search", params.search);
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    q.set("page", String(params.page ?? 1));
+    q.set("limit", String(params.limit ?? 20));
+    return json<
+      Paged<TrackingSession> & {
+        totals: { km: number; hours: number; tracked: number; live: number; off: number };
+      }
+    >(`/api/tracking?${q.toString()}`);
+  },
+
   /** One session WITH its route, for the map. */
   getTrackingSession: (id: string) => json<TrackingSession>(`/api/tracking/${id}`),
 

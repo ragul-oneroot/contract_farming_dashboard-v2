@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, Pencil, X } from "lucide-react";
+import { Plus, Trash2, Pencil, X, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, Product } from "../lib/api";
 
 type FormState = {
@@ -26,8 +26,14 @@ const emptyForm = (): FormState => ({
   preview: "",
 });
 
+const PAGE_SIZE = 20;
+
 export function ProductsManager() {
   const [products, setProducts] = useState<Product[]>([]);
+  /** Matches across every page, so the heading is not just this page's count. */
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
   const [cropOptions, setCropOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,10 +43,18 @@ export function ProductsManager() {
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  /**
+   * One page from the server, searched there too. A catalogue this screen
+   * paginates but filters in the browser would hide matches on later pages.
+   */
   const load = async () => {
     try {
-      const [prods, practices] = await Promise.all([api.listProducts(), api.listPractices()]);
-      setProducts(prods);
+      const [res, practices] = await Promise.all([
+        api.listProductsPage({ search: query, page, limit: PAGE_SIZE }),
+        api.listPractices(),
+      ]);
+      setProducts(res.items);
+      setTotal(res.total);
       setCropOptions(practices.map((p) => p.crop));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -49,9 +63,18 @@ export function ProductsManager() {
     }
   };
 
+  // Typing is debounced; paging is not, so the page turns at once.
   useEffect(() => {
-    load();
-  }, []);
+    const t = setTimeout(load, query ? 300 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, page]);
+
+  /** Searching from page 3 must land on page 1 of the new results. */
+  const search = (value: string) => {
+    setQuery(value);
+    setPage(1);
+  };
 
   function toggleCrop(crop: string) {
     setForm((f) => ({
@@ -129,8 +152,20 @@ export function ProductsManager() {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">
-          Products <span className="text-zinc-400">({products.length})</span>
+          Products <span className="text-zinc-400">({total})</span>
         </h1>
+        <div className="relative">
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400"
+          />
+          <input
+            value={query}
+            onChange={(e) => search(e.target.value)}
+            placeholder="Search products…"
+            className="w-56 rounded-lg border border-zinc-300 bg-transparent py-2 pl-8 pr-3 text-sm dark:border-zinc-700"
+          />
+        </div>
         <button
           onClick={openNew}
           className="flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
@@ -144,7 +179,9 @@ export function ProductsManager() {
       {loading ? (
         <p className="mt-6 text-zinc-500">Loading…</p>
       ) : products.length === 0 ? (
-        <p className="mt-6 text-zinc-500">No products yet. Click “Add product”.</p>
+        <p className="mt-6 text-zinc-500">
+          {query ? `No product matches “${query}”.` : "No products yet. Click “Add product”."}
+        </p>
       ) : (
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((p) => (
@@ -198,6 +235,35 @@ export function ProductsManager() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Only worth showing once there is more than one page to move between. */}
+      {!loading && total > PAGE_SIZE && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-zinc-500">
+          <span>
+            Showing {(page - 1) * PAGE_SIZE + 1} to {Math.min(page * PAGE_SIZE, total)} of {total}{" "}
+            products
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded-lg border border-zinc-300 p-1.5 disabled:opacity-40 dark:border-zinc-700"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="px-2">
+              {page} / {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+            </span>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={page >= Math.ceil(total / PAGE_SIZE)}
+              className="rounded-lg border border-zinc-300 p-1.5 disabled:opacity-40 dark:border-zinc-700"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
         </div>
       )}
 
