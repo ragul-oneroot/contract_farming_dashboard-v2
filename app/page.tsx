@@ -13,7 +13,7 @@ import {
   Clock,
   TrendingUp,
 } from "lucide-react";
-import { api, CatalogCrop, Order, OrderStatus, Person, Product } from "./lib/api";
+import { Acreage, api, CatalogCrop, Order, OrderStatus, Person, Product } from "./lib/api";
 import { useAuth } from "./lib/auth";
 
 const STATUS_STYLE: Record<OrderStatus, string> = {
@@ -34,23 +34,26 @@ export default function Home() {
   const [crops, setCrops] = useState<CatalogCrop[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [acreage, setAcreage] = useState<Acreage | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        const [f, a, c, p, o] = await Promise.all([
+        const [f, a, c, p, o, land] = await Promise.all([
           api.listFarmers().catch(() => []),
           api.listAgronomists().catch(() => []),
           api.listCropCatalog().catch(() => []),
           api.listProducts().catch(() => []),
           api.listOrders().catch(() => []),
+          api.getAcreage().catch(() => null),
         ]);
         setFarmers(f);
         setAgronomists(a);
         setCrops(c);
         setProducts(p);
         setOrders(o);
+        setAcreage(land);
       } finally {
         setLoading(false);
       }
@@ -139,6 +142,66 @@ export default function Home() {
               </div>
               <ArrowRight size={18} className="text-blue-600" />
             </Link>
+          )}
+        </div>
+      )}
+
+      {/* Land under cultivation, split by how it is farmed. */}
+      {acreage && acreage.total.crops > 0 && (
+        <div>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-400">
+            Land under cultivation
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              { label: "Contract farming", slice: acreage.contract, tone: "text-green-700 dark:text-green-400" },
+              { label: "Regular farming", slice: acreage.regular, tone: "text-amber-700 dark:text-amber-400" },
+              { label: "Total", slice: acreage.total, tone: "" },
+            ].map((s) => (
+              <div key={s.label} className="card p-4">
+                <div className="text-xs uppercase tracking-wide text-zinc-500">{s.label}</div>
+                <div className={`mt-1 text-2xl font-semibold ${s.tone}`}>
+                  {s.slice.acres.toLocaleString("en-IN")}{" "}
+                  <span className="text-base font-normal text-zinc-400">acres</span>
+                </div>
+                <div className="mt-0.5 text-xs text-zinc-500">
+                  {s.slice.crops} crop{s.slice.crops === 1 ? "" : "s"}
+                  {/* Said plainly: land with no area recorded is missing from
+                      the figure above, not counted as zero acres. */}
+                  {s.slice.missingArea > 0 ? ` · ${s.slice.missingArea} with no area recorded` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {acreage.byCrop.length > 0 && (
+            <div className="card mt-3 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-left text-sm">
+                <thead className="bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-300">
+                  <tr>
+                    <th className="px-4 py-2.5 font-semibold">Crop</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">Contract</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">Regular</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {acreage.byCrop.map((c) => (
+                    <tr
+                      key={c.name}
+                      className="border-t border-zinc-100 dark:border-zinc-800"
+                    >
+                      <td className="px-4 py-2.5 font-medium capitalize">{c.name}</td>
+                      <td className="px-4 py-2.5 text-right">{c.contract.acres.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-2.5 text-right">{c.regular.acres.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold">
+                        {c.acres.toLocaleString("en-IN")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

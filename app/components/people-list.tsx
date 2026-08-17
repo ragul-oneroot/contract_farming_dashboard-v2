@@ -46,6 +46,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
    * "who brought this farmer in".
    */
   const [onboardedByFilter, setOnboardedByFilter] = useState("");
+  /** "" = every farmer, else only those with a crop of that kind. */
+  const [farmingType, setFarmingType] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +90,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           ? await api.listFarmersPage({
               onboardedBy: onboardedByFilter,
               search: query,
+              farmingType,
               from,
               to,
               page,
@@ -118,7 +121,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     const t = setTimeout(load, query ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, from, to, onboardedByFilter, query, page]);
+  }, [role, from, to, onboardedByFilter, farmingType, query, page]);
 
   useEffect(() => {
     setPage(1);
@@ -126,6 +129,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     setFrom("");
     setTo("");
     setOnboardedByFilter("");
+    setFarmingType("");
     // The agronomist list feeds both the filter and the Add-farmer dropdown.
     api.listAgronomists().then(setAgronomists).catch(() => {});
     if (role === "farmer") api.listCropCatalog().then(setCatalog).catch(() => {});
@@ -216,7 +220,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
             <span className="text-zinc-500">Onboarded by</span>
             <select
               value={onboardedByFilter}
-              onChange={(e) => setOnboardedByFilter(e.target.value)}
+              onChange={(e) => applyFilter(setOnboardedByFilter)(e.target.value)}
               className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
             >
               <option value="">All</option>
@@ -229,6 +233,20 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
             </select>
           </>
         )}
+        {showDetail && (
+          <>
+            <span className="text-zinc-500">Farming</span>
+            <select
+              value={farmingType}
+              onChange={(e) => applyFilter(setFarmingType)(e.target.value)}
+              className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+            >
+              <option value="">All</option>
+              <option value="contract">Contract farming</option>
+              <option value="regular">Regular farming</option>
+            </select>
+          </>
+        )}
         <CalendarDays size={15} className="text-zinc-400" />
         <span className="text-zinc-500">
           {showDetail ? "Registered" : "Counts for farmers registered"}
@@ -236,14 +254,14 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           <input
             type="date"
             value={from}
-            onChange={(e) => setFrom(e.target.value)}
+            onChange={(e) => applyFilter(setFrom)(e.target.value)}
             className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
           />
           <span className="text-zinc-400">to</span>
           <input
             type="date"
             value={to}
-            onChange={(e) => setTo(e.target.value)}
+            onChange={(e) => applyFilter(setTo)(e.target.value)}
             className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
           />
           <button
@@ -251,17 +269,20 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               const today = new Date().toISOString().slice(0, 10);
               setFrom(today);
               setTo(today);
+              setPage(1);
             }}
             className="rounded-lg border border-zinc-300 px-2.5 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
             Today
           </button>
-        {(from || to || onboardedByFilter) && (
+        {(from || to || onboardedByFilter || farmingType) && (
           <button
             onClick={() => {
               setFrom("");
               setTo("");
               setOnboardedByFilter("");
+              setFarmingType("");
+              setPage(1);
             }}
             className="rounded-lg px-2.5 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
           >

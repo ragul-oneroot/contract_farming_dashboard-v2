@@ -377,6 +377,21 @@ export type FpoPage = {
   hasMore: boolean;
 };
 
+/** Land under each farming type, in acres. Counted from crops, not farmers. */
+export type AcreageSlice = {
+  acres: number;
+  crops: number;
+  /** Crops with no area recorded — real land missing from `acres`. */
+  missingArea: number;
+};
+
+export type Acreage = {
+  total: AcreageSlice;
+  contract: AcreageSlice;
+  regular: AcreageSlice;
+  byCrop: { name: string; contract: AcreageSlice; regular: AcreageSlice; acres: number }[];
+};
+
 export type DiseaseReport = {
   _id: string;
   reporter: { _id: string; name: string; mobile: string; role: string } | null;
@@ -501,6 +516,8 @@ export const api = {
     agronomist?: string;
     onboardedBy?: string;
     search?: string;
+    /** Farmers holding at least one crop of this kind. */
+    farmingType?: string;
     from?: string;
     to?: string;
     page?: number;
@@ -510,6 +527,7 @@ export const api = {
     if (params.agronomist) q.set("agronomist", params.agronomist);
     if (params.onboardedBy) q.set("onboardedBy", params.onboardedBy);
     if (params.search) q.set("search", params.search);
+    if (params.farmingType) q.set("farmingType", params.farmingType);
     if (params.from) q.set("from", params.from);
     if (params.to) q.set("to", params.to);
     q.set("page", String(params.page ?? 1));
@@ -637,6 +655,9 @@ export const api = {
   listVisits: () => json<Visit[]>("/api/visits"),
 
   // Crops reported as diseased, and the advice sent back.
+  /** Acreage split by contract vs regular farming, with a per-crop breakdown. */
+  getAcreage: () => json<Acreage>("/api/crops/acreage"),
+
   listDiseaseReports: (status?: "open" | "answered") =>
     json<DiseaseReport[]>(`/api/disease-reports${status ? `?status=${status}` : ""}`),
 
