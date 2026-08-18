@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays } from "lucide-react";
+import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays, MapPin } from "lucide-react";
 import { api, CatalogCrop, missingDetails, Person } from "../lib/api";
 import { AudioPlayer } from "./audio-player";
 
@@ -14,6 +14,35 @@ function NoFarm() {
   return (
     <span className="text-zinc-400" title="No farm boundary drawn yet, or the location could not be named">
       —
+    </span>
+  );
+}
+
+/**
+ * The agronomist list holds both plain and senior agronomists, and a senior
+ * answers the disease reports the others send in — so which one someone is
+ * decides who to route a question to. Seniors get the stronger colour because
+ * they are the few in a list of many.
+ */
+function RoleBadge({ role }: { role?: string }) {
+  if (!role) return <span className="text-zinc-400">—</span>;
+  const senior = role === "senior_agronomist";
+  const label = senior
+    ? "Senior agronomist"
+    : role === "agronomist"
+      ? "Agronomist"
+      : // Anything the enum grows later still reads sensibly.
+        role.replace(/_/g, " ");
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium capitalize ${
+        senior
+          ? "bg-violet-100 text-violet-800 dark:bg-violet-950/50 dark:text-violet-300"
+          : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+      }`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${senior ? "bg-violet-600" : "bg-zinc-400"}`} />
+      {label}
     </span>
   );
 }
@@ -31,7 +60,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
   // Agronomists get Onboarded / Assigned counts instead of the farmer-only columns.
   const showCounts = role === "agronomist";
-  const colCount = showDetail ? 14 : 6;
+  const colCount = showDetail ? 14 : 7;
 
   // Filters. On farmers these narrow the rows; on agronomists they narrow the
   // onboarded/assigned counts.
@@ -48,6 +77,18 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const [onboardedByFilter, setOnboardedByFilter] = useState("");
   /** "" = every farmer, else only those with a crop of that kind. */
   const [farmingType, setFarmingType] = useState("");
+  /**
+   * Where the farm is. Exact values chosen from the dropdowns, which are built
+   * from the addresses that actually exist rather than a fixed list of places.
+   */
+  const [district, setDistrict] = useState("");
+  const [taluk, setTaluk] = useState("");
+  const [village, setVillage] = useState("");
+  const [places, setPlaces] = useState<{ districts: string[]; taluks: string[]; villages: string[] }>({
+    districts: [],
+    taluks: [],
+    villages: [],
+  });
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +132,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               onboardedBy: onboardedByFilter,
               search: query,
               farmingType,
+              district,
+              taluk,
+              village,
               from,
               to,
               page,
@@ -116,12 +160,43 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     setPage(1);
   };
 
+  /**
+   * Picking a district drops the taluk and village under it; picking a taluk
+   * drops the village. Left in place they would contradict the new choice and
+   * the table would come back empty for no visible reason.
+   */
+  const pickDistrict = (v: string) => {
+    setDistrict(v);
+    setTaluk("");
+    setVillage("");
+    setPage(1);
+  };
+  const pickTaluk = (v: string) => {
+    setTaluk(v);
+    setVillage("");
+    setPage(1);
+  };
+
   // Typing is debounced; page moves are not, so the request fires at once.
   useEffect(() => {
     const t = setTimeout(load, query ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, from, to, onboardedByFilter, farmingType, query, page]);
+  }, [role, from, to, onboardedByFilter, farmingType, district, taluk, village, query, page]);
+
+  /**
+   * Reload the dropdowns whenever the level above changes, so the taluk list
+   * only holds that district's taluks and the village list only that taluk's
+   * villages. Without it the lower dropdowns would offer every place in the
+   * country and most choices would return nothing.
+   */
+  useEffect(() => {
+    if (role !== "farmer") return;
+    api
+      .farmerPlaces({ district, taluk })
+      .then(setPlaces)
+      .catch(() => setPlaces({ districts: [], taluks: [], villages: [] }));
+  }, [role, district, taluk]);
 
   useEffect(() => {
     setPage(1);
@@ -130,6 +205,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     setTo("");
     setOnboardedByFilter("");
     setFarmingType("");
+    setDistrict("");
+    setTaluk("");
+    setVillage("");
     // The agronomist list feeds both the filter and the Add-farmer dropdown.
     api.listAgronomists().then(setAgronomists).catch(() => {});
     if (role === "farmer") api.listCropCatalog().then(setCatalog).catch(() => {});
@@ -245,6 +323,47 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               <option value="contract">Contract farming</option>
               <option value="regular">Regular farming</option>
             </select>
+
+            {/* Where the farm is. Three dropdowns rather than a typed box: the
+                addresses are reverse-geocoded, so the spellings are the
+                geocoder's and nobody would guess them reliably. */}
+            <MapPin size={15} className="text-zinc-400" />
+            <select
+              value={district}
+              onChange={(e) => pickDistrict(e.target.value)}
+              className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+            >
+              <option value="">All districts</option>
+              {places.districts.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            <select
+              value={taluk}
+              onChange={(e) => pickTaluk(e.target.value)}
+              className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+            >
+              <option value="">All taluks</option>
+              {places.taluks.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <select
+              value={village}
+              onChange={(e) => applyFilter(setVillage)(e.target.value)}
+              className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+            >
+              <option value="">All villages</option>
+              {places.villages.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
           </>
         )}
         <CalendarDays size={15} className="text-zinc-400" />
@@ -275,13 +394,16 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           >
             Today
           </button>
-        {(from || to || onboardedByFilter || farmingType) && (
+        {(from || to || onboardedByFilter || farmingType || district || taluk || village) && (
           <button
             onClick={() => {
               setFrom("");
               setTo("");
               setOnboardedByFilter("");
               setFarmingType("");
+              setDistrict("");
+              setTaluk("");
+              setVillage("");
               setPage(1);
             }}
             className="rounded-lg px-2.5 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
@@ -306,6 +428,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           <thead className="sticky top-0 z-10 bg-green-50 text-green-800 [&>tr>th]:bg-green-50 dark:bg-green-950 dark:text-green-300 dark:[&>tr>th]:bg-green-950">
             <tr>
               <th className="px-4 py-3 font-semibold">Name</th>
+              {showCounts && <th className="px-4 py-3 font-semibold">Role</th>}
               <th className="px-4 py-3 font-semibold">Registered at</th>
               <th className="px-4 py-3 font-semibold">Mobile Number</th>
               <th className="px-4 py-3 font-semibold">Location</th>
@@ -353,6 +476,11 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                   className="border-t border-zinc-100 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
                 >
                   <td className="px-4 py-3 font-medium">{p.name}</td>
+                  {showCounts && (
+                    <td className="px-4 py-3">
+                      <RoleBadge role={p.role} />
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-zinc-500">{fmtDate(p.createdAt)}</td>
                   <td className="px-4 py-3">{p.mobile}</td>
                   <td className="px-4 py-3 text-zinc-500">

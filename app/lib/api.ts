@@ -14,6 +14,8 @@ export type Person = {
   _id: string;
   name: string;
   mobile: string;
+  /** "agronomist" | "senior_agronomist" | "farmer". Sent on the agronomist list. */
+  role?: string;
   location: { latitude: number | null; longitude: number | null };
   geofence?: { latitude: number; longitude: number }[]; // farm-boundary polygon
   farmAddress?: FarmAddress;
@@ -239,6 +241,56 @@ export type CallLog = {
   recordingUrl?: string;
   calledAt: string;
   createdAt: string;
+};
+
+/** One row of a day's work — a farmer registered, met, visited or sold to. */
+export type DayReportRow = {
+  id: string;
+  name: string;
+  mobile: string;
+  /** The farmer's whole recorded holding, not the area worked that day. */
+  acres: number;
+  crops: number;
+  cropNames: string[];
+  at: string | null;
+  place?: string;
+  notes?: string;
+  source?: string;
+  cropName?: string;
+  total?: number;
+  products?: string[];
+};
+
+/** A day's work in full: the counts, and the records behind them. */
+export type DayReport = {
+  agent: { name: string; mobile: string; role: string } | null;
+  date: string;
+  /** Null until the agent has submitted their report for that day. */
+  report: {
+    dailyReport: string;
+    dailyExpenses: string;
+    expectedExpensesTomorrow: string;
+    planOfActionTomorrow: string;
+    at: string;
+  } | null;
+  stats: {
+    distanceKm: number;
+    trackedMinutes: number;
+    sessions: number;
+    newFarmers: number;
+    oldFarmers: number;
+    visits: number;
+    sales: number;
+    salesTotal: number;
+  };
+  onboarded: DayReportRow[];
+  /**
+   * Farmers met today who were NOT registered today — deduplicated, so
+   * visiting someone and selling to them is one person met, not two.
+   */
+  metExisting: DayReportRow[];
+  visits: DayReportRow[];
+  sales: DayReportRow[];
 };
 
 export type DailyReport = {
@@ -518,6 +570,10 @@ export const api = {
     search?: string;
     /** Farmers holding at least one crop of this kind. */
     farmingType?: string;
+    /** Where the farm is. Exact values, taken from `farmerPlaces` below. */
+    district?: string;
+    taluk?: string;
+    village?: string;
     from?: string;
     to?: string;
     page?: number;
@@ -528,11 +584,30 @@ export const api = {
     if (params.onboardedBy) q.set("onboardedBy", params.onboardedBy);
     if (params.search) q.set("search", params.search);
     if (params.farmingType) q.set("farmingType", params.farmingType);
+    if (params.district) q.set("district", params.district);
+    if (params.taluk) q.set("taluk", params.taluk);
+    if (params.village) q.set("village", params.village);
     if (params.from) q.set("from", params.from);
     if (params.to) q.set("to", params.to);
     q.set("page", String(params.page ?? 1));
     q.set("limit", String(params.limit ?? 20));
     return json<Paged<Person>>(`/api/users/farmers?${q.toString()}`);
+  },
+
+  /**
+   * The places farmers actually sit in, for the location dropdowns.
+   *
+   * Narrows as it goes: pass the chosen district to get only its taluks, and
+   * the chosen taluk to get only its villages, so the dropdowns cannot offer a
+   * combination that matches nothing.
+   */
+  farmerPlaces: (params: { district?: string; taluk?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.district) q.set("district", params.district);
+    if (params.taluk) q.set("taluk", params.taluk);
+    return json<{ districts: string[]; taluks: string[]; villages: string[] }>(
+      `/api/users/farmers/places?${q.toString()}`
+    );
   },
 
   /** Agronomists a page at a time. The farmer counts cover the given window. */
@@ -650,6 +725,25 @@ export const api = {
 
   // Daily reports submitted by field agents
   listDailyReports: () => json<DailyReport[]>("/api/daily-reports"),
+
+  /**
+   * One agent's whole day: the records behind the counts on a report.
+   *
+   * The same endpoint the app's "View my day in full" uses, so the dashboard
+   * and the agent's own phone can never show a different day.
+   */
+  getDayReport: (userId: string, date?: string) => {
+    const q = new URLSearchParams({ user: userId });
+    if (date) q.set("date", date);
+    return json<DayReport>(`/api/day-report?${q.toString()}`);
+  },
+
+  /** The same day as a PDF, generated server-side. */
+  dayReportPdfUrl: (userId: string, date?: string) => {
+    const q = new URLSearchParams({ user: userId });
+    if (date) q.set("date", date);
+    return `${API_URL}/api/day-report.pdf?${q.toString()}`;
+  },
 
   // Farm visits logged by agronomists
   listVisits: () => json<Visit[]>("/api/visits"),

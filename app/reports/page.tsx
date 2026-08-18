@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Eye } from "lucide-react";
 import { api, DailyReport } from "../lib/api";
+import { DayDetailModal } from "../components/day-detail-modal";
 
 function fmtDate(s: string) {
   return new Date(s).toLocaleString(undefined, {
@@ -18,6 +19,10 @@ export default function ReportsPage() {
   const [reports, setReports] = useState<DailyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Whose day is open, if any. Null closes the dialog. */
+  const [viewing, setViewing] = useState<{ userId: string; name: string; date: string } | null>(
+    null
+  );
 
   useEffect(() => {
     api
@@ -53,6 +58,7 @@ export default function ReportsPage() {
                 <th className="px-4 py-3 font-medium">Today&apos;s Expenses</th>
                 <th className="px-4 py-3 font-medium">Expected (Tomorrow)</th>
                 <th className="px-4 py-3 font-medium">Plan (Tomorrow)</th>
+                <th className="px-4 py-3 font-medium">Day</th>
               </tr>
             </thead>
             <tbody>
@@ -100,6 +106,27 @@ export default function ReportsPage() {
                     <td className="px-4 py-3"><div className="max-w-[150px]">{cell(r.dailyExpenses)}</div></td>
                     <td className="px-4 py-3"><div className="max-w-[150px]">{cell(r.expectedExpensesTomorrow)}</div></td>
                     <td className="px-4 py-3"><div className="max-w-[240px]">{cell(r.planOfActionTomorrow)}</div></td>
+                    {/* The columns above are what the agent typed. This opens
+                        what actually happened: every farmer registered, met,
+                        visited and sold to on that day, by name.
+
+                        Needs the user id — a report filed by someone since
+                        deleted has only their name snapshot, and there is no
+                        day to fetch without an id to fetch it for. */}
+                    <td className="px-4 py-3">
+                      {r.user?._id ? (
+                        <button
+                          onClick={() =>
+                            setViewing({ userId: r.user!._id, name, date: r.date })
+                          }
+                          className="flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-green-600/40 bg-green-50 px-2.5 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 dark:bg-green-950/40 dark:text-green-400 dark:hover:bg-green-900/40"
+                        >
+                          <Eye size={13} /> View
+                        </button>
+                      ) : (
+                        <span className="text-xs italic text-zinc-400">—</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -107,6 +134,13 @@ export default function ReportsPage() {
           </table>
         </div>
       )}
+
+      <DayDetailModal
+        userId={viewing?.userId ?? null}
+        name={viewing?.name ?? ""}
+        date={viewing?.date}
+        onClose={() => setViewing(null)}
+      />
     </div>
   );
 }
