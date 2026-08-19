@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { PhotoLightbox } from "./photo-lightbox";
 import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays, MapPin } from "lucide-react";
 import { api, CatalogCrop, missingDetails, Person } from "../lib/api";
 import { AudioPlayer } from "./audio-player";
@@ -60,7 +61,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
   // Agronomists get Onboarded / Assigned counts instead of the farmer-only columns.
   const showCounts = role === "agronomist";
-  const colCount = showDetail ? 14 : 7;
+  // Grows with the Photo column, or the loading and empty rows stop short of
+  // the table's width.
+  const colCount = showDetail ? 15 : 7;
 
   // Filters. On farmers these narrow the rows; on agronomists they narrow the
   // onboarded/assigned counts.
@@ -84,6 +87,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const [district, setDistrict] = useState("");
   const [taluk, setTaluk] = useState("");
   const [village, setVillage] = useState("");
+  /** Which farmer's photo is open, if any. Null closes the lightbox. */
+  const [photo, setPhoto] = useState<{ url: string; name: string } | null>(null);
   const [places, setPlaces] = useState<{ districts: string[]; taluks: string[]; villages: string[] }>({
     districts: [],
     taluks: [],
@@ -427,6 +432,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
         <table className={`w-full text-left text-sm ${showDetail ? "min-w-[1280px]" : ""}`}>
           <thead className="sticky top-0 z-10 bg-green-50 text-green-800 [&>tr>th]:bg-green-50 dark:bg-green-950 dark:text-green-300 dark:[&>tr>th]:bg-green-950">
             <tr>
+              {showDetail && <th className="px-4 py-3 font-semibold">Photo</th>}
               <th className="px-4 py-3 font-semibold">Name</th>
               {showCounts && <th className="px-4 py-3 font-semibold">Role</th>}
               <th className="px-4 py-3 font-semibold">Registered at</th>
@@ -475,6 +481,34 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                   key={p._id}
                   className="border-t border-zinc-100 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
                 >
+                  {/* The photo taken when this farmer was registered. A
+                      thumbnail is too small to recognise anyone by, so it is a
+                      button into the full picture rather than the picture
+                      itself. Farmers registered before photos were captured —
+                      and any added from this dashboard — simply have none. */}
+                  {showDetail && (
+                    <td className="px-4 py-3">
+                      {p.photoUrl ? (
+                        <button
+                          onClick={() => setPhoto({ url: p.photoUrl!, name: p.name })}
+                          title={`View ${p.name}'s photo`}
+                          className="block overflow-hidden rounded-lg ring-1 ring-zinc-200 transition hover:ring-2 hover:ring-green-500 dark:ring-zinc-700"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={p.photoUrl}
+                            alt={p.name}
+                            loading="lazy"
+                            className="h-10 w-10 object-cover"
+                          />
+                        </button>
+                      ) : (
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-xs font-semibold text-zinc-400 dark:bg-zinc-900">
+                          {p.name?.charAt(0)?.toUpperCase() || "?"}
+                        </div>
+                      )}
+                    </td>
+                  )}
                   <td className="px-4 py-3 font-medium">{p.name}</td>
                   {showCounts && (
                     <td className="px-4 py-3">
@@ -896,6 +930,14 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           </form>
         </div>
       )}
+
+      {/* Sits outside the table so it is never clipped by the scroll container
+          the rows live in. */}
+      <PhotoLightbox
+        url={photo?.url ?? null}
+        caption={photo?.name}
+        onClose={() => setPhoto(null)}
+      />
     </div>
   );
 }

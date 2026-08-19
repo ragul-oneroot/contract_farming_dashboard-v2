@@ -61,6 +61,8 @@ export type Person = {
   onboardedCount?: number;
   /** Farmers handed to them — added from the dashboard or reassigned. Agronomists only. */
   assignedCount?: number;
+  /** Photo taken at onboarding. Empty when none was captured. Farmers only. */
+  photoUrl?: string;
   /** The conversation recorded while this farmer was onboarded. Farmers only. */
   onboardingAudioUrl?: string;
   onboardingAudioAt?: string | null;
