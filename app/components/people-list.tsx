@@ -63,7 +63,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const showCounts = role === "agronomist";
   // Grows with the Photo column, or the loading and empty rows stop short of
   // the table's width.
-  const colCount = showDetail ? 15 : 7;
+  const colCount = showDetail ? 16 : 7;
 
   // Filters. On farmers these narrow the rows; on agronomists they narrow the
   // onboarded/assigned counts.
@@ -441,6 +441,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               {showDetail && <th className="px-4 py-3 font-semibold">District</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Taluk</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Village</th>}
+              {showDetail && <th className="px-4 py-3 font-semibold text-right">Acres</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">FPO</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Agronomist</th>}
               {showDetail && <th className="px-4 py-3 font-semibold">Onboarded by</th>}
@@ -525,6 +526,23 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                   {showDetail && <td className="px-4 py-3">{p.farmAddress?.district || <NoFarm />}</td>}
                   {showDetail && <td className="px-4 py-3">{p.farmAddress?.taluk || <NoFarm />}</td>}
                   {showDetail && <td className="px-4 py-3">{p.farmAddress?.village || <NoFarm />}</td>}
+                  {/* Land across all of this farmer's crops. A farmer with
+                      crops but no areas recorded shows a dash rather than 0 —
+                      "nothing written down" and "no land" are different
+                      answers, and only one of them needs chasing. */}
+                  {showDetail && (
+                    <td className="px-4 py-3 text-right">
+                      {p.acres ? (
+                        <span className="font-medium">{p.acres}</span>
+                      ) : p.cropCount ? (
+                        <span className="italic text-zinc-400" title="Crops added, but no area recorded">
+                          —
+                        </span>
+                      ) : (
+                        <NoFarm />
+                      )}
+                    </td>
+                  )}
                   {showDetail && (
                     <td className="px-4 py-3">
                       {p.fpo ? (

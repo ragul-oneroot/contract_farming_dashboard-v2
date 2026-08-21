@@ -57,6 +57,13 @@ export type Person = {
   geofenceCount?: number;
   /** Crops this farmer has added. Farmers only. */
   cropCount?: number;
+  /**
+   * Total land across this farmer's crops, in acres. Farmers only.
+   *
+   * Zero means no area was recorded, which is not the same as having no crops —
+   * `cropCount` is what says that.
+   */
+  acres?: number;
   /** Farmers this agronomist registered themselves. Agronomists only. */
   onboardedCount?: number;
   /** Farmers handed to them — added from the dashboard or reassigned. Agronomists only. */
@@ -340,6 +347,12 @@ export type ProductSaleItem = {
   imageUrl: string;
   qty: number;
   unitPrice: number;
+  /** The discount on this product as the agronomist entered it. */
+  discount?: number;
+  discountType?: "rs" | "pct";
+  /** The rupees that actually came off this line. */
+  discountAmount?: number;
+  /** qty x unitPrice, less `discountAmount`. */
   lineTotal: number;
   /** Taken at handover. */
   beforePhotoUrl: string;
@@ -359,6 +372,14 @@ export type ProductSale = {
   crop: string | null;
   cropName: string;
   items: ProductSaleItem[];
+  /**
+   * A discount on the basket as a whole, taken off after the per-product ones.
+   * Absent on sales recorded before discounts existed.
+   */
+  discount?: number;
+  discountType?: "rs" | "pct";
+  discountAmount?: number;
+  /** What the farmer paid, GST included. */
   total: number;
   location: { latitude: number | null; longitude: number | null };
   notes: string;
@@ -727,6 +748,9 @@ export const api = {
 
   // Daily reports submitted by field agents
   listDailyReports: () => json<DailyReport[]>("/api/daily-reports"),
+
+  /** The bill for one field sale, as a PDF — the same one the app hands over. */
+  saleInvoicePdfUrl: (saleId: string) => `${API_URL}/api/product-sales/${saleId}/pdf`,
 
   /**
    * One agent's whole day: the records behind the counts on a report.
