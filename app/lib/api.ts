@@ -329,12 +329,34 @@ export type DailyReport = {
 export type Visit = {
   _id: string;
   agronomist: { _id: string; name: string; mobile: string } | null;
-  farmer: { _id: string; name: string; mobile: string } | null;
+  /**
+   * The farmer, carrying what is currently owed to them.
+   *
+   * Read from the farmer rather than the visit: the visit records what was
+   * promised on the day, but a later visit changes what is actually still due.
+   */
+  farmer: {
+    _id: string;
+    name: string;
+    mobile: string;
+    /** The day the office asked for a visit. Shows under To visit in the app. */
+    visitDate?: string | null;
+    /** The day the AGENT promised. Shows under Follow up in the app. */
+    nextFollowUpAt?: string | null;
+    followUpNote?: string;
+    lastVisitedAt?: string | null;
+    /** Set when someone decided this farmer needs no visit, and why. */
+    skippedAt?: string | null;
+    skipReason?: string;
+  } | null;
   farmerName: string;
   farmPhotoUrl: string;
   farmerPhotoUrl: string;
   location: { latitude: number | null; longitude: number | null };
   notes: string;
+  /** What the agent promised at THIS visit, as written on the day. */
+  followUpNote?: string;
+  nextFollowUpAt?: string | null;
   visitedAt: string;
   createdAt: string;
 };
@@ -656,11 +678,38 @@ export const api = {
     agronomistId?: string | null;
     crop?: string;
     variety?: string;
+    /**
+     * "contract" or "regular". Anything else is read as contract by the server,
+     * matching the crop schema's own default.
+     */
+    farmingType?: string;
     dop?: string | null;
     /** yyyy-mm-dd — the day the assigned agronomist should visit. */
     visitDate?: string | null;
   }) => json<Person>("/api/users/farmers", { method: "POST", body: JSON.stringify(body) }),
-  updateFarmer: (id: string, body: { name?: string; mobile?: string }) =>
+  /**
+   * Edit a farmer. Every field is optional and only what is sent is touched, so
+   * renaming someone cannot clear the follow-up they are owed.
+   *
+   * `nextFollowUpAt` is an ISO instant, or null to clear it.
+   */
+  updateFarmer: (
+    id: string,
+    body: {
+      name?: string;
+      mobile?: string;
+      nextFollowUpAt?: string | null;
+      followUpNote?: string;
+      /** The day the office wants them visited. Shows under To visit in the app. */
+      visitDate?: string | null;
+      /**
+       * "No visit needed". `skipReason` is required when setting it, and
+       * setting it clears any date owed. `false` lifts the skip.
+       */
+      skipped?: boolean;
+      skipReason?: string;
+    }
+  ) =>
     json<Person>(`/api/users/farmers/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   // `from`/`to` (yyyy-mm-dd) narrow the onboarded/assigned counts to farmers
   // registered in that window.
@@ -772,7 +821,13 @@ export const api = {
   },
 
   // Farm visits logged by agronomists
-  listVisits: () => json<Visit[]>("/api/visits"),
+  listVisits: (params: { agronomist?: string; from?: string; to?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.agronomist) q.set("agronomist", params.agronomist);
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    return json<Visit[]>(`/api/visits?${q.toString()}`);
+  },
 
   // Crops reported as diseased, and the advice sent back.
   /** Acreage split by contract vs regular farming, with a per-crop breakdown. */

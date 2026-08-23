@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { FollowUpDialog } from "./follow-up-dialog";
 import { PhotoLightbox } from "./photo-lightbox";
-import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays, MapPin } from "lucide-react";
+import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays, CalendarClock, MapPin } from "lucide-react";
 import { api, CatalogCrop, missingDetails, Person } from "../lib/api";
 import { AudioPlayer } from "./audio-player";
 
@@ -56,6 +57,33 @@ function fmtDate(s: string) {
   });
 }
 
+/** Every control in the Add-farmer dialog, so none can drift from the others. */
+const FIELD =
+  "w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700";
+
+/** A labelled cell of the form grid, with an optional note under the control. */
+function Field({
+  label,
+  required,
+  hint,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-sm text-zinc-500">
+        {label} {required ? <span className="text-red-600">*</span> : null}
+      </label>
+      {children}
+      {hint ? <p className="mt-1 text-xs text-zinc-500">{hint}</p> : null}
+    </div>
+  );
+}
+
 export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const label = role === "farmer" ? "farmers" : "agronomists";
   const showDetail = role === "farmer"; // only farmers have a detail page + agronomist
@@ -89,6 +117,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const [village, setVillage] = useState("");
   /** Which farmer's photo is open, if any. Null closes the lightbox. */
   const [photo, setPhoto] = useState<{ url: string; name: string } | null>(null);
+  /** Whose follow-up is being set. Null closes that dialog. */
+  const [followUpFor, setFollowUpFor] = useState<Person | null>(null);
   const [places, setPlaces] = useState<{ districts: string[]; taluks: string[]; villages: string[] }>({
     districts: [],
     taluks: [],
@@ -116,6 +146,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     visitDate: "",
     crop: "",
     variety: "",
+    /** Matches the crop schema's default, which treats anything else as contract. */
+    farmingType: "contract",
     dop: "",
   });
   const [saving, setSaving] = useState(false);
@@ -226,6 +258,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
       visitDate: "",
       crop: "",
       variety: "",
+      farmingType: "contract",
       dop: "",
     });
     setFormError(null);
@@ -249,6 +282,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
         visitDate: (form.agronomistId && form.visitDate) || null,
         crop: form.crop || undefined,
         variety: form.variety || undefined,
+        farmingType: form.farmingType,
         dop: form.dop || null,
       });
       setAdding(false);
@@ -698,6 +732,18 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
 
                         return <span className="text-xs text-zinc-400">—</span>;
                       })()}
+                      {/* Setting the day the agent should come back.
+                          Offered whatever the cell says above, because the case
+                          that needs it most is the one with nothing in it: a
+                          farmer visited and then owed nothing drops off every
+                          list without anyone noticing. */}
+                      <button
+                        onClick={() => setFollowUpFor(p)}
+                        className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-green-600/40 px-2 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-950/40"
+                      >
+                        <CalendarClock size={11} />
+                        {p.nextFollowUpAt ? "Change" : "Set follow-up"}
+                      </button>
                     </td>
                   )}
                   {showDetail && (
@@ -788,9 +834,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <form
             onSubmit={submitAdd}
-            className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
+            className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
           >
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-5 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Add farmer</h2>
               <button
                 type="button"
@@ -801,125 +847,149 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               </button>
             </div>
 
-            <label className="mb-1 block text-sm text-zinc-500">
-              Name <span className="text-red-600">*</span>
-            </label>
-            <input
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              required
-              autoFocus
-              placeholder="Farmer's full name"
-              className="mb-3 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
-            />
-
-            <label className="mb-1 block text-sm text-zinc-500">
-              Mobile number <span className="text-red-600">*</span>
-            </label>
-            <input
-              value={form.mobile}
-              onChange={(e) => setForm((f) => ({ ...f, mobile: e.target.value }))}
-              required
-              inputMode="numeric"
-              placeholder="10-digit number"
-              className="mb-3 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
-            />
-
-            <label className="mb-1 block text-sm text-zinc-500">Assign agronomist</label>
-            <select
-              value={form.agronomistId}
-              onChange={(e) => setForm((f) => ({ ...f, agronomistId: e.target.value }))}
-              className="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
-            >
-              <option value="">— Unassigned —</option>
-              {agronomists.map((a) => (
-                <option key={a._id} value={a._id}>
-                  {a.name} ({a.mobile})
-                </option>
-              ))}
-            </select>
-
-            {/*
-              Only offered once an agronomist is picked — a visit day with
-              nobody to do the visiting is not a thing we can ask for, and the
-              submit handler drops it in that case anyway.
-            */}
-            {form.agronomistId && (
-              <>
-                <label className="mb-1 mt-3 block text-sm text-zinc-500">Visit by (optional)</label>
+            {/* Two columns. The form is short fields — a name, a number, a
+                date — and one per row made a tall dialog out of very little,
+                with the crop half of it pushed below the fold. */}
+            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+              <Field label="Name" required>
                 <input
-                  type="date"
-                  value={form.visitDate}
-                  onChange={(e) => setForm((f) => ({ ...f, visitDate: e.target.value }))}
-                  className="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  required
+                  autoFocus
+                  placeholder="Farmer's full name"
+                  className={FIELD}
                 />
-                <p className="mt-1 text-xs text-zinc-500">
-                  Shows against this farmer in the agronomist&apos;s Dashboard tab under Farm
-                  Visits.
-                </p>
-              </>
-            )}
+              </Field>
 
-            <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-              <p className="mb-2 text-sm font-medium">First crop (optional)</p>
+              <Field label="Mobile number" required>
+                <input
+                  value={form.mobile}
+                  onChange={(e) => setForm((f) => ({ ...f, mobile: e.target.value }))}
+                  required
+                  inputMode="numeric"
+                  placeholder="10-digit number"
+                  className={FIELD}
+                />
+              </Field>
 
-              <label className="mb-1 block text-sm text-zinc-500">Crop</label>
-              <select
-                value={form.crop}
-                onChange={(e) =>
-                  // Varieties belong to a crop, so clear the old one on change.
-                  setForm((f) => ({ ...f, crop: e.target.value, variety: "" }))
-                }
-                className="mb-3 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
-              >
-                <option value="">— No crop yet —</option>
-                {catalog.map((c) => (
-                  <option key={c._id} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <Field label="Assign agronomist">
+                <select
+                  value={form.agronomistId}
+                  onChange={(e) => setForm((f) => ({ ...f, agronomistId: e.target.value }))}
+                  className={FIELD}
+                >
+                  <option value="">— Unassigned —</option>
+                  {agronomists.map((a) => (
+                    <option key={a._id} value={a._id}>
+                      {a.name} ({a.mobile})
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
-              {form.crop && (
-                <>
-                  <label className="mb-1 block text-sm text-zinc-500">Variety</label>
-                  {varieties.length > 0 ? (
-                    <select
-                      value={form.variety}
-                      onChange={(e) => setForm((f) => ({ ...f, variety: e.target.value }))}
-                      className="mb-3 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
-                    >
-                      <option value="">— Any —</option>
-                      {varieties.map((v) => (
-                        <option key={v} value={v}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      value={form.variety}
-                      onChange={(e) => setForm((f) => ({ ...f, variety: e.target.value }))}
-                      placeholder="Variety name"
-                      className="mb-3 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
-                    />
-                  )}
-
-                  <label className="mb-1 block text-sm text-zinc-500">
-                    Date of planting (D.O.P){" "}
-                    <span className="text-zinc-400">— optional</span>
-                  </label>
+              {/*
+                Only offered once an agronomist is picked — a visit day with
+                nobody to do the visiting is not a thing we can ask for, and the
+                submit handler drops it in that case anyway.
+              */}
+              {form.agronomistId ? (
+                <Field label="Visit by" hint="Shows against them in the app under Farm Visits.">
                   <input
                     type="date"
-                    value={form.dop}
-                    onChange={(e) => setForm((f) => ({ ...f, dop: e.target.value }))}
-                    className="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+                    value={form.visitDate}
+                    onChange={(e) => setForm((f) => ({ ...f, visitDate: e.target.value }))}
+                    className={FIELD}
                   />
-                  <p className="mt-1 text-xs text-zinc-500">
-                    The Package of Practices schedule is counted from this date.
-                  </p>
-                </>
+                </Field>
+              ) : (
+                <div className="hidden sm:block" />
               )}
+            </div>
+
+            <div className="mt-5 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+              <p className="mb-3 text-sm font-medium">First crop (optional)</p>
+
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+                <Field label="Crop">
+                  <select
+                    value={form.crop}
+                    onChange={(e) =>
+                      // Varieties belong to a crop, so clear the old one on change.
+                      setForm((f) => ({ ...f, crop: e.target.value, variety: "" }))
+                    }
+                    className={FIELD}
+                  >
+                    <option value="">— No crop yet —</option>
+                    {catalog.map((c) => (
+                      <option key={c._id} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                {form.crop ? (
+                  <>
+                    {/* Asked before variety and planting date, because it
+                        decides what those mean: a contract crop is worked to a
+                        Package of Practices counted from the D.O.P, a regular
+                        one is not. */}
+                    <Field label="Farming type">
+                      <select
+                        value={form.farmingType}
+                        onChange={(e) => setForm((f) => ({ ...f, farmingType: e.target.value }))}
+                        className={FIELD}
+                      >
+                        <option value="contract">Contract farming</option>
+                        <option value="regular">Regular farming</option>
+                      </select>
+                    </Field>
+
+                    <Field label="Variety">
+                      {varieties.length > 0 ? (
+                        <select
+                          value={form.variety}
+                          onChange={(e) => setForm((f) => ({ ...f, variety: e.target.value }))}
+                          className={FIELD}
+                        >
+                          <option value="">— Any —</option>
+                          {varieties.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={form.variety}
+                          onChange={(e) => setForm((f) => ({ ...f, variety: e.target.value }))}
+                          placeholder="Variety name"
+                          className={FIELD}
+                        />
+                      )}
+                    </Field>
+
+                    {/* Only a contract crop has a schedule to count, so a
+                        regular one is not asked for a planting date — the
+                        server discards it for regular crops anyway, and the app
+                        hides it for the same reason. */}
+                    {form.farmingType === "contract" ? (
+                      <Field
+                        label="Date of planting (D.O.P)"
+                        hint="The Package of Practices schedule is counted from this date."
+                      >
+                        <input
+                          type="date"
+                          value={form.dop}
+                          onChange={(e) => setForm((f) => ({ ...f, dop: e.target.value }))}
+                          className={FIELD}
+                        />
+                      </Field>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
             </div>
 
             <p className="mt-3 text-xs text-zinc-500">
@@ -951,6 +1021,19 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
 
       {/* Sits outside the table so it is never clipped by the scroll container
           the rows live in. */}
+      {/* Saving patches the one row in place — reloading would rebuild the
+          table and lose whatever the reader had scrolled to. */}
+      {followUpFor ? (
+        <FollowUpDialog
+          key={followUpFor._id}
+          farmer={followUpFor}
+          onClose={() => setFollowUpFor(null)}
+          onSaved={(updated) =>
+            setPeople((list) => list.map((x) => (x._id === updated._id ? { ...x, ...updated } : x)))
+          }
+        />
+      ) : null}
+
       <PhotoLightbox
         url={photo?.url ?? null}
         caption={photo?.name}
