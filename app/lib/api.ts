@@ -383,6 +383,22 @@ export type ProductSaleItem = {
   afterPhotoAt: string | null;
 };
 
+/**
+ * Who a sale went to, whichever kind of buyer it was.
+ *
+ * A sale belongs to a farmer OR an FPO, and every view that shows one has to
+ * make the same choice about which name and number to use. Doing it in one
+ * place means an FPO sale can never be rendered as a farmer with a blank name.
+ */
+export function saleBuyer(s: ProductSale) {
+  // The FPO fields decide it: a farmer sale never has them, and a sale saved
+  // before FPOs could buy has neither, so it falls through to the farmer.
+  if (s.fpo || s.fpoName) {
+    return { kind: "fpo" as const, name: s.fpoName || "FPO", mobile: s.fpoMobile || "" };
+  }
+  return { kind: "farmer" as const, name: s.farmerName || "Farmer", mobile: s.farmerMobile || "" };
+}
+
 /** A basket of products an agronomist sold to a farmer out on the farm. */
 export type ProductSale = {
   _id: string;
@@ -391,6 +407,10 @@ export type ProductSale = {
   farmer: string;
   farmerName: string;
   farmerMobile: string;
+  /** Set instead of `farmer` when an FPO bought. Snapshots, like the farmer's. */
+  fpo?: string | null;
+  fpoName?: string;
+  fpoMobile?: string;
   crop: string | null;
   cropName: string;
   items: ProductSaleItem[];
@@ -935,11 +955,24 @@ export const api = {
   },
 
   // Products sold to farmers on the field. Optional filters narrow the list.
-  listProductSales: (params?: { agronomistId?: string; farmerId?: string; since?: string }) => {
+  listProductSales: (params?: {
+    agronomistId?: string;
+    farmerId?: string;
+    since?: string;
+    /**
+     * A closed window, as yyyy-mm-dd. Converted to local-midnight instants
+     * here: sent bare, they are read as UTC — 05:30 in IST — so a sale made
+     * early on the first morning would fall outside its own day.
+     */
+    from?: string;
+    to?: string;
+  }) => {
     const q = new URLSearchParams();
     if (params?.agronomistId) q.set("agronomist", params.agronomistId);
     if (params?.farmerId) q.set("farmer", params.farmerId);
     if (params?.since) q.set("since", params.since);
+    if (params?.from) q.set("from", new Date(`${params.from}T00:00:00`).toISOString());
+    if (params?.to) q.set("to", new Date(`${params.to}T23:59:59.999`).toISOString());
     const qs = q.toString();
     return json<ProductSale[]>(`/api/product-sales${qs ? `?${qs}` : ""}`);
   },

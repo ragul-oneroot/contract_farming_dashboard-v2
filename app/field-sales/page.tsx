@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, ExternalLink, MapPin, ShoppingBag } from "lucide-react";
-import { api, Person, ProductSale } from "../lib/api";
+import { CalendarDays, Download, ExternalLink, MapPin, ShoppingBag } from "lucide-react";
+import { api, Person, ProductSale, saleBuyer } from "../lib/api";
 import { PhotoThumb } from "../components/lightbox";
 
 function fmtTime(s: string) {
@@ -19,6 +19,20 @@ const money = (n: number) =>
   `₹${(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * A period ending today, as the two yyyy-mm-dd ends of a closed window.
+ *
+ * Both ends always, so no choice can leave one side open — an open side is what
+ * made a single date read as "everything up to then" and pull in earlier days.
+ */
+function daysBack(days: number) {
+  const iso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  return { from: iso(start), to: iso(new Date()) };
+}
 
 /**
  * GST on farm inputs is 5%, and it is already inside every price — the figure
@@ -134,14 +148,27 @@ export default function FieldSalesPage() {
   const [sales, setSales] = useState<ProductSale[]>([]);
   const [agronomists, setPersons] = useState<Person[]>([]);
   const [who, setWho] = useState(""); // "" = everyone
+  // A closed window, not an open-ended "since": a lone date read as a picker
+  // but meant "everything from here onward", with no way to bound the far end.
   const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  /**
+   * Which kind of buyer. Narrowed here rather than on the server: the two live
+   * in one collection and the page already has every sale it is showing, so a
+   * round trip would only make the toggle feel slower than it is.
+   */
+  const [buyerKind, setBuyerKind] = useState<"" | "farmer" | "fpo">("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      api.listProductSales({ agronomistId: who || undefined, since: from || undefined }),
+      api.listProductSales({
+        agronomistId: who || undefined,
+        from: from || undefined,
+        to: to || undefined,
+      }),
       api.listAgronomists().catch(() => [] as Person[]),
     ])
       .then(([s, a]) => {
@@ -151,20 +178,34 @@ export default function FieldSalesPage() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load field sales"))
       .finally(() => setLoading(false));
-  }, [who, from]);
+  }, [who, from, to]);
+
+  const rows = useMemo(
+    () => (buyerKind ? sales.filter((s) => saleBuyer(s).kind === buyerKind) : sales),
+    [sales, buyerKind]
+  );
+
+  /** How the fetched set splits, so each option can carry its own count. */
+  const kinds = useMemo(
+    () => ({
+      farmer: sales.filter((s) => saleBuyer(s).kind === "farmer").length,
+      fpo: sales.filter((s) => saleBuyer(s).kind === "fpo").length,
+    }),
+    [sales]
+  );
 
   // Headline numbers for whatever filter is currently applied.
   const stats = useMemo(() => {
-    const revenue = sales.reduce((s, x) => s + (x.total ?? 0), 0);
-    const units = sales.reduce((s, x) => s + x.items.reduce((n, i) => n + i.qty, 0), 0);
-    const lines = sales.reduce((s, x) => s + x.items.length, 0);
-    const complete = sales.reduce(
+    const revenue = rows.reduce((s, x) => s + (x.total ?? 0), 0);
+    const units = rows.reduce((s, x) => s + x.items.reduce((n, i) => n + i.qty, 0), 0);
+    const lines = rows.reduce((s, x) => s + x.items.length, 0);
+    const complete = rows.reduce(
       (s, x) => s + x.items.filter((i) => i.beforePhotoUrl && i.afterPhotoUrl).length,
       0
     );
     // Only count an after-photo as missing once its waiting period has elapsed;
     // before that it is simply not due yet, which is not a failure.
-    const overdue = sales.reduce((s, x) => {
+    const overdue = rows.reduce((s, x) => {
       const due = x.afterDueAt ? new Date(x.afterDueAt).getTime() : 0;
       if (due > Date.now()) return s;
       return s + x.items.filter((i) => !i.afterPhotoUrl).length;
@@ -175,22 +216,52 @@ export default function FieldSalesPage() {
      * the catalogue says and what the company actually collected, and until now
      * nothing on this page showed it at all.
      */
-    const discounts = sales.reduce((n, x) => {
+    const discounts = rows.reduce((n, x) => {
       const lines = x.items.reduce((m, i) => m + (i.discountAmount ?? 0), 0);
       return n + lines + (x.discountAmount ?? 0);
     }, 0);
     return { revenue, units, lines, complete, overdue, discounts };
-  }, [sales]);
+  }, [rows]);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <ShoppingBag size={20} className="text-green-600" />
-          <h2 className="text-lg font-semibold">Field Sales ({sales.length})</h2>
+          <h2 className="text-lg font-semibold">
+            Field Sales ({rows.length}
+            {rows.length !== sales.length ? ` of ${sales.length}` : ""})
+          </h2>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Farmer or FPO. A segmented control rather than another dropdown:
+              there are only two kinds of buyer and the split is the thing being
+              asked about, so it is worth seeing without opening anything. */}
+          <div className="flex overflow-hidden rounded-lg border border-zinc-300 dark:border-zinc-700">
+            {(
+              [
+                { key: "", label: "All", n: sales.length },
+                { key: "farmer", label: "Farmers", n: kinds.farmer },
+                { key: "fpo", label: "FPOs", n: kinds.fpo },
+              ] as const
+            ).map((o) => (
+              <button
+                key={o.key}
+                onClick={() => setBuyerKind(o.key)}
+                className={`px-3 py-1.5 text-sm font-medium transition ${
+                  buyerKind === o.key
+                    ? "bg-green-600 text-white"
+                    : "hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                }`}
+              >
+                {o.label}
+                <span className={buyerKind === o.key ? "ml-1.5 opacity-80" : "ml-1.5 text-zinc-400"}>
+                  {o.n}
+                </span>
+              </button>
+            ))}
+          </div>
           <select
             value={who}
             onChange={(e) => setWho(e.target.value)}
@@ -203,17 +274,62 @@ export default function FieldSalesPage() {
               </option>
             ))}
           </select>
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          {(who || from) && (
+          {/* Periods, then one exact day.
+              Two date boxes read as a range, but either could be left empty —
+              filling only the second meant "everything up to then", which
+              quietly included days before it. Every choice here sets BOTH ends,
+              so a date always means that date. */}
+          <div className="flex overflow-hidden rounded-lg border border-zinc-300 dark:border-zinc-700">
+            {(
+              [
+                { key: "today", label: "Today", days: 0 },
+                { key: "7d", label: "7 days", days: 6 },
+                { key: "30d", label: "30 days", days: 29 },
+              ] as const
+            ).map((o) => {
+              const range = daysBack(o.days);
+              const on = from === range.from && to === range.to;
+              return (
+                <button
+                  key={o.key}
+                  onClick={() => {
+                    if (on) {
+                      setFrom("");
+                      setTo("");
+                    } else {
+                      setFrom(range.from);
+                      setTo(range.to);
+                    }
+                  }}
+                  className={`px-3 py-1.5 text-sm font-medium transition ${
+                    on ? "bg-green-600 text-white" : "hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-2 dark:border-zinc-700">
+            <CalendarDays size={15} className="text-zinc-400" />
+            <input
+              type="date"
+              value={from && from === to ? from : ""}
+              // One day, both ends. Picking 23 Aug shows the 23rd and nothing else.
+              onChange={(e) => {
+                setFrom(e.target.value);
+                setTo(e.target.value);
+              }}
+              className="bg-transparent py-1.5 text-sm outline-none"
+            />
+          </div>
+          {(who || from || to || buyerKind) && (
             <button
               onClick={() => {
                 setWho("");
                 setFrom("");
+                setTo("");
+                setBuyerKind("");
               }}
               className="text-sm text-zinc-500 hover:underline"
             >
@@ -228,7 +344,7 @@ export default function FieldSalesPage() {
         {[
           { label: "Revenue", value: money(stats.revenue) },
           { label: "Discounts given", value: money(stats.discounts) },
-          { label: "Sales", value: String(sales.length) },
+          { label: "Sales", value: String(rows.length) },
           { label: "Units given", value: String(stats.units) },
           { label: "Both photos", value: `${stats.complete}/${stats.lines}` },
           {
@@ -253,15 +369,20 @@ export default function FieldSalesPage() {
         <p className="text-zinc-500">Loading…</p>
       ) : error ? (
         <p className="text-red-600">{error}</p>
-      ) : sales.length === 0 ? (
+      ) : rows.length === 0 ? (
         <p className="text-sm text-zinc-500">
-          No field sales yet. They appear when an agronomist gives a product to a farmer in the app.
+          {sales.length === 0
+            ? "No field sales yet. They appear when an agronomist gives a product to a farmer or an FPO in the app."
+            : `No sales to ${buyerKind === "fpo" ? "FPOs" : "farmers"} match these filters.`}
         </p>
       ) : (
         <div className="space-y-4">
-          {sales.map((s) => {
+          {rows.map((s) => {
             const hasLoc = s.location?.latitude != null && s.location?.longitude != null;
             const bill = billOf(s);
+            // Farmer or FPO — one helper, so the two can never be shown as
+            // each other.
+            const buyer = saleBuyer(s);
             return (
               <div
                 key={s._id}
@@ -270,12 +391,17 @@ export default function FieldSalesPage() {
                 {/* Who gave what to whom, and when — the head of a bill. */}
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-100 px-4 py-3 dark:border-zinc-900">
                   <div>
-                    <div className="font-medium">
-                      {s.farmerName || "Farmer"}
-                      {s.farmerMobile ? (
-                        <span className="ml-2 text-sm font-normal text-zinc-500">
-                          {s.farmerMobile}
+                    <div className="flex flex-wrap items-center gap-2 font-medium">
+                      {buyer.name}
+                      {/* Said, not implied: without it an FPO sale reads as a
+                          farmer sale whose details happen to be missing. */}
+                      {buyer.kind === "fpo" ? (
+                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                          FPO
                         </span>
+                      ) : null}
+                      {buyer.mobile ? (
+                        <span className="text-sm font-normal text-zinc-500">{buyer.mobile}</span>
                       ) : null}
                     </div>
                     <div className="mt-0.5 text-xs text-zinc-500">
