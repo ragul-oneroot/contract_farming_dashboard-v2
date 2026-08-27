@@ -308,12 +308,26 @@ export default function VisitsPage() {
                         >
                           {v.farmer.skipReason}
                         </div>
-                      ) : v.farmer?.followUpNote ? (
+                      ) : v.followUpNote || v.farmer?.followUpNote ? (
+                        /**
+                         * The visit's OWN note first, the farmer's current one
+                         * only as a fallback.
+                         *
+                         * They differ, and the difference matters here: the
+                         * farmer record carries a note only while a date is
+                         * pending, so a visit that ended without one — "crop
+                         * looked fine, nothing owed" — used to leave this cell
+                         * blank however much the agent had written. The note is
+                         * now required on every visit, so it is always worth
+                         * showing, date or no date.
+                         */
                         <div
-                          className="mt-1 max-w-[14rem] truncate text-xs text-zinc-500"
-                          title={v.farmer.followUpNote}
+                          className="mt-1 max-w-[14rem] text-xs text-zinc-500"
+                          title={v.followUpNote || v.farmer?.followUpNote}
                         >
-                          {v.farmer.followUpNote}
+                          <span className="line-clamp-2">
+                            {v.followUpNote || v.farmer?.followUpNote}
+                          </span>
                         </div>
                       ) : null}
                       {v.farmer?._id ? (

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { api, Person, ProductSale, saleBuyer } from "../lib/api";
+import { isLateEntry, lateEntryDays, LateEntryTag } from "../components/late-entry-tag";
 import { money, RankedBars, shortMoney, TrendChart } from "../components/charts";
 
 /**
@@ -267,6 +268,10 @@ export default function AnalysisPage() {
       "Taluk",
       "District",
       "Buyer acres",
+      // Two columns rather than one flag: the office reconciles against dates,
+      // and "when was this typed" answers more than a yes/no ever could.
+      "Recorded on",
+      "Entered late",
       "Agronomist",
       "Crop",
       "Product",
@@ -301,6 +306,8 @@ export default function AnalysisPage() {
             // Blank, not 0, on an FPO row: a spreadsheet summing this column
             // should not be told an FPO farms nought acres.
             typeof s.farmerAcres === "number" ? s.farmerAcres : "",
+            s.createdAt ? new Date(s.createdAt).toLocaleString() : "",
+            isLateEntry(s) ? "yes" : "",
             s.agronomist?.name || s.agronomistName || "",
             s.cropName || "",
             i.name,
@@ -581,6 +588,19 @@ export default function AnalysisPage() {
                         month: "short",
                         year: "numeric",
                       })}
+                      {/* Under the date here, not beside it: the column is
+                          narrow and the tag is what qualifies the date. The
+                          full pair of dates does not fit a table cell, so this
+                          says how late it was; the export carries the exact
+                          instant in its Recorded on column. */}
+                      {isLateEntry(s) ? (
+                        <div className="mt-1 space-y-0.5">
+                          <LateEntryTag sale={s} />
+                          <div className="whitespace-normal text-[11px] text-amber-700 dark:text-amber-400">
+                            entered {lateEntryDays(s)} days later
+                          </div>
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       <div className="font-medium">{b.name}</div>

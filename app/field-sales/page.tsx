@@ -11,7 +11,17 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import { api, Person, ProductSale, saleBuyer } from "../lib/api";
+import { isLateEntry, LateEntryNote, LateEntryTag } from "../components/late-entry-tag";
 import { PhotoThumb } from "../components/lightbox";
+
+/** The day alone — for a sale whose time was never actually observed. */
+function fmtDay(s: string) {
+  return new Date(s).toLocaleDateString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 function fmtTime(s: string) {
   return new Date(s).toLocaleString(undefined, {
@@ -434,16 +444,27 @@ export default function FieldSalesPage() {
                           FPO
                         </span>
                       ) : null}
+                      {/* An old sale, written up after the fact. Beside the
+                          buyer rather than beside the date: it qualifies what
+                          kind of record this is, not what day it names. */}
+                      <LateEntryTag sale={s} />
                       {buyer.mobile ? (
                         <span className="text-sm font-normal text-zinc-500">{buyer.mobile}</span>
                       ) : null}
                     </div>
                     <div className="mt-0.5 text-xs text-zinc-500">
-                      {fmtTime(s.soldAt)} · by{" "}
+                      {/* No time on an old sale: it was picked off a calendar,
+                          so the hour stored with it is ours, not the field's. */}
+                      {isLateEntry(s) ? fmtDay(s.soldAt) : fmtTime(s.soldAt)} · by{" "}
                       {s.agronomist?.name || s.agronomistName || "Agronomist"}
                       {s.cropName ? ` · ${s.cropName}` : ""}
                     </div>
                   </div>
+                  {/* The empty middle of the row. On an ordinary sale nothing
+                      renders here at all; on an old one it is where the two
+                      dates belong — read at a glance, with nothing to hover. */}
+                  <LateEntryNote sale={s} className="min-w-0 flex-1 sm:px-4" />
+
                   <div className="flex items-center gap-3">
                     {hasLoc && (
                       <a
