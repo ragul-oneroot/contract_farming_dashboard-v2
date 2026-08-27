@@ -1,6 +1,19 @@
 @import "tailwindcss";
 
+/*
+ * Data-viz palette. Both modes are chosen, not flipped: the dark values are the
+ * same hues re-stepped for a dark surface, and each set was run through the
+ * palette validator (lightness band, chroma floor, CVD separation, contrast)
+ * rather than picked by eye.
+ *
+ * Blue is the single sequential hue — every one-series chart uses it — and the
+ * rest are the categorical order, taken in sequence and never cycled.
+ */
 :root {
+  --viz-1: #2a78d6; /* blue   — sequential default */
+  --viz-2: #eb6834; /* orange */
+  --viz-3: #1baf7a; /* aqua   */
+  --viz-4: #eda100; /* yellow */
   --background: #ffffff;
   --foreground: #171717;
 }
@@ -13,6 +26,12 @@
 }
 
 @media (prefers-color-scheme: dark) {
+  :root {
+    --viz-1: #3987e5;
+    --viz-2: #d95926;
+    --viz-3: #199e70;
+    --viz-4: #c98500;
+  }
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;

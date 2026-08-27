@@ -390,13 +390,30 @@ export type ProductSaleItem = {
  * make the same choice about which name and number to use. Doing it in one
  * place means an FPO sale can never be rendered as a farmer with a blank name.
  */
-export function saleBuyer(s: ProductSale) {
+export function saleBuyer(s: ProductSale): {
+  kind: "farmer" | "fpo";
+  /** Null only when the buyer's record was since deleted. */
+  id: string | null;
+  name: string;
+  mobile: string;
+} {
   // The FPO fields decide it: a farmer sale never has them, and a sale saved
   // before FPOs could buy has neither, so it falls through to the farmer.
   if (s.fpo || s.fpoName) {
-    return { kind: "fpo" as const, name: s.fpoName || "FPO", mobile: s.fpoMobile || "" };
+    return {
+      kind: "fpo",
+      id: s.fpo?._id ?? null,
+      // The snapshot leads: it is what was true at the time of the sale.
+      name: s.fpoName || s.fpo?.name || "FPO",
+      mobile: s.fpoMobile || s.fpo?.mobile || "",
+    };
   }
-  return { kind: "farmer" as const, name: s.farmerName || "Farmer", mobile: s.farmerMobile || "" };
+  return {
+    kind: "farmer",
+    id: s.farmer?._id ?? null,
+    name: s.farmerName || s.farmer?.name || "Farmer",
+    mobile: s.farmerMobile || s.farmer?.mobile || "",
+  };
 }
 
 /** A basket of products an agronomist sold to a farmer out on the farm. */
@@ -404,13 +421,24 @@ export type ProductSale = {
   _id: string;
   agronomist: { _id: string; name: string; mobile: string } | null;
   agronomistName: string;
-  farmer: string;
+  /**
+   * The buyer, populated by the list endpoint so a sale can say where it
+   * happened. The name and number are also snapshot on the sale itself, which
+   * is what keeps an old sale readable after a rename.
+   */
+  farmer: { _id: string; name: string; mobile: string; farmAddress?: FarmAddress } | null;
   farmerName: string;
   farmerMobile: string;
   /** Set instead of `farmer` when an FPO bought. Snapshots, like the farmer's. */
-  fpo?: string | null;
+  fpo?: { _id: string; name: string; mobile: string; address?: FarmAddress } | null;
   fpoName?: string;
   fpoMobile?: string;
+  /**
+   * The buyer's whole recorded holding, in acres — sent only when asked for.
+   * Null on an FPO sale: an FPO has no crops of its own, and a nought would drag
+   * a per-acre average down as if it farmed nothing.
+   */
+  farmerAcres?: number | null;
   crop: string | null;
   cropName: string;
   items: ProductSaleItem[];
@@ -966,9 +994,15 @@ export const api = {
      */
     from?: string;
     to?: string;
+    /**
+     * Attach each buyer's recorded acreage. Costs an extra aggregate, so it is
+     * asked for only where it is shown.
+     */
+    withAcres?: boolean;
   }) => {
     const q = new URLSearchParams();
     if (params?.agronomistId) q.set("agronomist", params.agronomistId);
+    if (params?.withAcres) q.set("withAcres", "1");
     if (params?.farmerId) q.set("farmer", params.farmerId);
     if (params?.since) q.set("since", params.since);
     if (params?.from) q.set("from", new Date(`${params.from}T00:00:00`).toISOString());

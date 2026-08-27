@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { LayoutDashboard, Users, UserCog, Sprout, Package, Phone, ClipboardList, MapPin, LogOut, ChevronLeft, Leaf, ShieldCheck, ShoppingBag, Navigation, Bug, Building2 } from "lucide-react";
+import { LayoutDashboard, Users, UserCog, Sprout, Package, Phone, ClipboardList, MapPin, LogOut, ChevronLeft, Leaf, ShieldCheck, ShoppingBag, Navigation, Bug, Building2, BarChart3 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 
 const NAV = [
@@ -14,6 +14,7 @@ const NAV = [
   { href: "/crops", label: "Crops", icon: Sprout },
   { href: "/products", label: "Products", icon: Package },
   { href: "/field-sales", label: "Field Sales", icon: ShoppingBag },
+  { href: "/analysis", label: "Sales Analysis", icon: BarChart3 },
   { href: "/calls", label: "Calls", icon: Phone },
   { href: "/visits", label: "Farm Visits", icon: MapPin },
   { href: "/tracking", label: "Tracking", icon: Navigation },
@@ -30,6 +31,7 @@ const TITLES: Record<string, string> = {
   "/crops": "Crops & Package of Practices",
   "/products": "Products",
   "/field-sales": "Field Sales & Product Proof",
+  "/analysis": "Sales Analysis",
   "/calls": "Call Logs & Recordings",
   "/visits": "Farm Visits",
   "/tracking": "Tracking & Distance",

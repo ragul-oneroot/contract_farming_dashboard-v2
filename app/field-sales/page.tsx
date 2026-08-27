@@ -1,7 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Download, ExternalLink, MapPin, ShoppingBag } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  CalendarDays,
+  Download,
+  ExternalLink,
+  MapPin,
+  RefreshCw,
+  Search,
+  ShoppingBag,
+} from "lucide-react";
 import { api, Person, ProductSale, saleBuyer } from "../lib/api";
 import { PhotoThumb } from "../components/lightbox";
 
@@ -158,32 +166,53 @@ export default function FieldSalesPage() {
    * round trip would only make the toggle feel slower than it is.
    */
   const [buyerKind, setBuyerKind] = useState<"" | "farmer" | "fpo">("");
+  /** Buyer name or number. Narrowed here, like the kind — the page already
+   *  holds every sale it is showing. */
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  /** Named so Refresh can call it, rather than duplicating the fetch. */
+  const load = useCallback(async () => {
     setLoading(true);
-    Promise.all([
-      api.listProductSales({
-        agronomistId: who || undefined,
-        from: from || undefined,
-        to: to || undefined,
-      }),
-      api.listAgronomists().catch(() => [] as Person[]),
-    ])
-      .then(([s, a]) => {
-        setSales(s);
-        setPersons(a);
-        setError(null);
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load field sales"))
-      .finally(() => setLoading(false));
+    try {
+      const [s, a] = await Promise.all([
+        api.listProductSales({
+          agronomistId: who || undefined,
+          from: from || undefined,
+          to: to || undefined,
+        }),
+        api.listAgronomists().catch(() => [] as Person[]),
+      ]);
+      setSales(s);
+      setPersons(a);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load field sales");
+    } finally {
+      setLoading(false);
+    }
   }, [who, from, to]);
 
-  const rows = useMemo(
-    () => (buyerKind ? sales.filter((s) => saleBuyer(s).kind === buyerKind) : sales),
-    [sales, buyerKind]
-  );
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const digits = q.replace(/\D/g, "");
+    return sales.filter((s) => {
+      const buyer = saleBuyer(s);
+      if (buyerKind && buyer.kind !== buyerKind) return false;
+      if (!q) return true;
+      // Name or number, whichever kind of buyer it was — searching "Rafk"
+      // should find an FPO's sales as readily as a farmer's.
+      return (
+        buyer.name.toLowerCase().includes(q) ||
+        (!!digits && buyer.mobile.replace(/\D/g, "").includes(digits))
+      );
+    });
+  }, [sales, buyerKind, query]);
 
   /** How the fetched set splits, so each option can carry its own count. */
   const kinds = useMemo(
@@ -225,115 +254,120 @@ export default function FieldSalesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <ShoppingBag size={20} className="text-green-600" />
-          <h2 className="text-lg font-semibold">
-            Field Sales ({rows.length}
-            {rows.length !== sales.length ? ` of ${sales.length}` : ""})
-          </h2>
+      <div className="flex items-center gap-2">
+        <ShoppingBag size={20} className="text-green-600" />
+        <h2 className="text-lg font-semibold">
+          Field Sales ({rows.length}
+          {rows.length !== sales.length ? ` of ${sales.length}` : ""})
+        </h2>
+      </div>
+
+      {/* The same two-row shape the Farmers tab uses: a toolbar with search on
+          top, then one labelled row of filters beneath. Laid out the same way
+          on purpose — somebody who has learned to filter farmers should not
+          have to learn a second arrangement here. */}
+      <div className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-wrap items-center gap-3 border-b border-zinc-100 p-3 dark:border-zinc-800">
+          <button
+            onClick={() => load()}
+            className="flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            <RefreshCw size={15} /> Refresh
+          </button>
+          <div className="relative min-w-[220px] flex-1">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by farmer, FPO or number…"
+              className="w-full rounded-lg border border-zinc-300 bg-transparent py-2 pl-9 pr-3 text-sm dark:border-zinc-700"
+            />
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Farmer or FPO. A segmented control rather than another dropdown:
-              there are only two kinds of buyer and the split is the thing being
-              asked about, so it is worth seeing without opening anything. */}
-          <div className="flex overflow-hidden rounded-lg border border-zinc-300 dark:border-zinc-700">
-            {(
-              [
-                { key: "", label: "All", n: sales.length },
-                { key: "farmer", label: "Farmers", n: kinds.farmer },
-                { key: "fpo", label: "FPOs", n: kinds.fpo },
-              ] as const
-            ).map((o) => (
-              <button
-                key={o.key}
-                onClick={() => setBuyerKind(o.key)}
-                className={`px-3 py-1.5 text-sm font-medium transition ${
-                  buyerKind === o.key
-                    ? "bg-green-600 text-white"
-                    : "hover:bg-zinc-100 dark:hover:bg-zinc-900"
-                }`}
-              >
-                {o.label}
-                <span className={buyerKind === o.key ? "ml-1.5 opacity-80" : "ml-1.5 text-zinc-400"}>
-                  {o.n}
-                </span>
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+          <span className="text-zinc-500">Sold to</span>
+          <select
+            value={buyerKind}
+            onChange={(e) => setBuyerKind(e.target.value as "" | "farmer" | "fpo")}
+            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+          >
+            <option value="">All ({sales.length})</option>
+            <option value="farmer">Farmers ({kinds.farmer})</option>
+            <option value="fpo">FPOs ({kinds.fpo})</option>
+          </select>
+
+          <span className="text-zinc-500">Agronomist</span>
           <select
             value={who}
             onChange={(e) => setWho(e.target.value)}
-            className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
           >
-            <option value="">All agronomists</option>
+            <option value="">All</option>
             {agronomists.map((a) => (
               <option key={a._id} value={a._id}>
                 {a.name}
               </option>
             ))}
           </select>
-          {/* Periods, then one exact day.
-              Two date boxes read as a range, but either could be left empty —
-              filling only the second meant "everything up to then", which
-              quietly included days before it. Every choice here sets BOTH ends,
-              so a date always means that date. */}
-          <div className="flex overflow-hidden rounded-lg border border-zinc-300 dark:border-zinc-700">
-            {(
-              [
-                { key: "today", label: "Today", days: 0 },
-                { key: "7d", label: "7 days", days: 6 },
-                { key: "30d", label: "30 days", days: 29 },
-              ] as const
-            ).map((o) => {
-              const range = daysBack(o.days);
-              const on = from === range.from && to === range.to;
-              return (
-                <button
-                  key={o.key}
-                  onClick={() => {
-                    if (on) {
-                      setFrom("");
-                      setTo("");
-                    } else {
-                      setFrom(range.from);
-                      setTo(range.to);
-                    }
-                  }}
-                  className={`px-3 py-1.5 text-sm font-medium transition ${
-                    on ? "bg-green-600 text-white" : "hover:bg-zinc-100 dark:hover:bg-zinc-900"
-                  }`}
-                >
-                  {o.label}
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-2 dark:border-zinc-700">
-            <CalendarDays size={15} className="text-zinc-400" />
-            <input
-              type="date"
-              value={from && from === to ? from : ""}
-              // One day, both ends. Picking 23 Aug shows the 23rd and nothing else.
-              onChange={(e) => {
-                setFrom(e.target.value);
-                setTo(e.target.value);
-              }}
-              className="bg-transparent py-1.5 text-sm outline-none"
-            />
-          </div>
-          {(who || from || to || buyerKind) && (
+
+          <CalendarDays size={15} className="text-zinc-400" />
+          <span className="text-zinc-500">Given</span>
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+          />
+          <span className="text-zinc-400">to</span>
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+          />
+          {/* One tap for the day, and for the periods worth asking about.
+              Each sets BOTH ends — an open-ended window is what made a single
+              date read as "everything from then onward". */}
+          {(
+            [
+              { key: "today", label: "Today", days: 0 },
+              { key: "7d", label: "7 days", days: 6 },
+              { key: "30d", label: "30 days", days: 29 },
+            ] as const
+          ).map((o) => {
+            const range = daysBack(o.days);
+            const on = from === range.from && to === range.to;
+            return (
+              <button
+                key={o.key}
+                onClick={() => {
+                  setFrom(on ? "" : range.from);
+                  setTo(on ? "" : range.to);
+                }}
+                className={`rounded-lg border px-2.5 py-1 ${
+                  on
+                    ? "border-green-600 bg-green-600 text-white"
+                    : "border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                }`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+
+          {(who || from || to || buyerKind || query) && (
             <button
               onClick={() => {
                 setWho("");
                 setFrom("");
                 setTo("");
                 setBuyerKind("");
+                setQuery("");
               }}
-              className="text-sm text-zinc-500 hover:underline"
+              className="rounded-lg px-2.5 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
             >
-              Clear
+              Clear filters
             </button>
           )}
         </div>
