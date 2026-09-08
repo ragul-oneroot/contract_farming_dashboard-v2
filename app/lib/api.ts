@@ -16,6 +16,12 @@ export type Person = {
   mobile: string;
   /** "agronomist" | "senior_agronomist" | "farmer". Sent on the agronomist list. */
   role?: string;
+  /**
+   * The taluk an agronomist works out of — it decides how their sales are
+   * numbered. Populated on the agronomist list; absent until the office maps
+   * them. Agronomists only.
+   */
+  region?: { _id: string; district: string; taluk: string; code: string } | null;
   location: { latitude: number | null; longitude: number | null };
   geofence?: { latitude: number; longitude: number }[]; // farm-boundary polygon
   farmAddress?: FarmAddress;
@@ -417,6 +423,20 @@ export function saleBuyer(s: ProductSale): {
 }
 
 /** A basket of products an agronomist sold to a farmer out on the farm. */
+/**
+ * A taluk the company sells in, and the code its bills carry: ENP-CHM-01 out of
+ * Chamarajanagar. `seq` is how many have been issued there.
+ */
+export type Region = {
+  _id: string;
+  district: string;
+  taluk: string;
+  code: string;
+  seq: number;
+  /** How many agronomists work out of it — a region in use cannot be deleted. */
+  agronomists?: number;
+};
+
 export type ProductSale = {
   _id: string;
   agronomist: { _id: string; name: string; mobile: string } | null;
@@ -457,6 +477,19 @@ export type ProductSale = {
   /** When the follow-up after-photos become collectable. */
   afterDueAt: string | null;
   createdAt: string;
+  /** The bill's own number, e.g. ENP-CHM01. Blank on older sales. */
+  invoiceNo?: string;
+  /** Corrections made from the office, newest last. */
+  edits?: {
+    at: string;
+    by: string;
+    wasTotal: number;
+    nowTotal: number;
+    /** Only set when the bill's number itself was changed. */
+    wasInvoiceNo?: string;
+    nowInvoiceNo?: string;
+    reason?: string;
+  }[];
 };
 
 /** A senior agronomist's answer to a disease report. */
@@ -845,6 +878,55 @@ export const api = {
 
   // Daily reports submitted by field agents
   listDailyReports: () => json<DailyReport[]>("/api/daily-reports"),
+
+  // ---- Regions: which taluk an agronomist works out of, and so which series
+  // numbers their bills.
+  listRegions: () => json<Region[]>("/api/regions"),
+  createRegion: (body: { district: string; taluk: string; code: string }) =>
+    json<Region>("/api/regions", { method: "POST", body: JSON.stringify(body) }),
+  updateRegion: (id: string, body: { district?: string; taluk?: string; code?: string }) =>
+    json<Region>(`/api/regions/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteRegion: (id: string) =>
+    json<{ message: string; id: string }>(`/api/regions/${id}`, { method: "DELETE" }),
+  /** Send no id to unmap: their sales fall back to the year-based numbering. */
+  setAgronomistRegion: (agronomistId: string, regionId: string | null) =>
+    json<Person>(`/api/regions/agronomists/${agronomistId}`, {
+      method: "PUT",
+      body: JSON.stringify({ regionId }),
+    }),
+
+  /**
+   * Correct a sale that was already recorded.
+   *
+   * Sends what was ENTERED — quantities, prices, and a discount as a number
+   * plus what it means — never the totals. The server recomputes the money, so
+   * the edit screen cannot become a way around the arithmetic every other
+   * route obeys. Omitted fields are left as they are.
+   */
+  updateProductSale: (
+    id: string,
+    body: {
+      items: { productId: string; qty: number; unitPrice: number; discount?: number; discountType?: "rs" | "pct" }[];
+      discount?: number;
+      discountType?: "rs" | "pct";
+      /** One buyer, never both. Send neither to leave the sale where it is. */
+      farmerId?: string | null;
+      fpoId?: string | null;
+      agronomistId?: string;
+      cropName?: string;
+      notes?: string;
+      /** The bill's own number. Must be unique across every sale. */
+      invoiceNo?: string;
+      /** A full instant, not a bare date — a bare one is read as UTC midnight. */
+      soldAt?: string;
+      editedBy?: string;
+      reason?: string;
+    }
+  ) =>
+    json<ProductSale>(`/api/product-sales/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 
   /** The bill for one field sale, as a PDF — the same one the app hands over. */
   saleInvoicePdfUrl: (saleId: string) => `${API_URL}/api/product-sales/${saleId}/pdf`,

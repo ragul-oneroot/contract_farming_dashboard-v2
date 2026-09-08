@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { FollowUpDialog } from "./follow-up-dialog";
 import { PhotoLightbox } from "./photo-lightbox";
 import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays, CalendarClock, MapPin } from "lucide-react";
-import { api, CatalogCrop, missingDetails, Person } from "../lib/api";
+import { api, CatalogCrop, missingDetails, Person, Region } from "../lib/api";
+import { RegionsDialog } from "./regions-dialog";
 import { AudioPlayer } from "./audio-player";
 
 const PAGE_SIZE = 20;
@@ -91,7 +92,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   const showCounts = role === "agronomist";
   // Grows with the Photo column, or the loading and empty rows stop short of
   // the table's width.
-  const colCount = showDetail ? 16 : 7;
+  // The agronomist table gained a Region column.
+  const colCount = showDetail ? 16 : 8;
 
   // Filters. On farmers these narrow the rows; on agronomists they narrow the
   // onboarded/assigned counts.
@@ -126,6 +128,9 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
   });
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
+  /** The taluks bills are numbered by. Agronomist table only. */
+  const [regions, setRegions] = useState<Region[]>([]);
+  const [showRegions, setShowRegions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   /** How many rows the current filters match in total, not just on this page. */
@@ -227,6 +232,12 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
    * villages. Without it the lower dropdowns would offer every place in the
    * country and most choices would return nothing.
    */
+  // The taluks that number the bills, for the agronomist table's Region column.
+  useEffect(() => {
+    if (role !== "agronomist") return;
+    api.listRegions().then(setRegions).catch(() => setRegions([]));
+  }, [role, showRegions]);
+
   useEffect(() => {
     if (role !== "farmer") return;
     api
@@ -320,6 +331,14 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
             className="w-full rounded-lg border border-zinc-300 bg-transparent py-2 pl-9 pr-3 text-sm dark:border-zinc-700"
           />
         </div>
+        {showCounts && (
+          <button
+            onClick={() => setShowRegions(true)}
+            className="flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            <MapPin size={15} /> Regions
+          </button>
+        )}
         {showDetail && (
           <button
             onClick={openAdd}
@@ -487,6 +506,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               {showDetail && <th className="px-4 py-3 font-semibold text-right">Details</th>}
               {showCounts && <th className="px-4 py-3 font-semibold">Onboarded</th>}
               {showCounts && <th className="px-4 py-3 font-semibold">Assigned</th>}
+              {showCounts && <th className="px-4 py-3 font-semibold">Region</th>}
             </tr>
           </thead>
           <tbody>
@@ -783,6 +803,33 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
                       <span className="ml-2 text-xs text-zinc-500">handed over</span>
                     </td>
                   )}
+                  {/* The taluk this agent sells out of, which decides how their
+                      bills are numbered. Changing it only affects sales made
+                      afterwards — the bills already handed over keep theirs. */}
+                  {showCounts && (
+                    <td className="px-4 py-3">
+                      <select
+                        value={p.region?._id ?? ""}
+                        onChange={async (e) => {
+                          const regionId = e.target.value || null;
+                          try {
+                            await api.setAgronomistRegion(p._id, regionId);
+                            await load();
+                          } catch (err) {
+                            alert(err instanceof Error ? err.message : "Could not set the region.");
+                          }
+                        }}
+                        className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 text-xs dark:border-zinc-700"
+                      >
+                        <option value="">Not mapped</option>
+                        {regions.map((r) => (
+                          <option key={r._id} value={r._id}>
+                            {r.taluk} · ENP-{r.code}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
                   {showDetail && (
                     <td className="px-4 py-2 text-right">
                       <Link
@@ -1039,6 +1086,10 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
         caption={photo?.name}
         onClose={() => setPhoto(null)}
       />
+
+      {/* Closing it reloads the list, so a region added here is immediately
+          choosable against every agronomist. */}
+      {showRegions && <RegionsDialog onClose={() => setShowRegions(false)} />}
     </div>
   );
 }

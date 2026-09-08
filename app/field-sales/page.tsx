@@ -5,12 +5,14 @@ import {
   CalendarDays,
   Download,
   ExternalLink,
+  Pencil,
   MapPin,
   RefreshCw,
   Search,
   ShoppingBag,
 } from "lucide-react";
-import { api, Person, ProductSale, saleBuyer } from "../lib/api";
+import { api, Person, ProductSale, Region, saleBuyer } from "../lib/api";
+import { EditSaleDialog } from "../components/edit-sale-dialog";
 import { isLateEntry, LateEntryNote, LateEntryTag } from "../components/late-entry-tag";
 import { PhotoThumb } from "../components/lightbox";
 
@@ -164,6 +166,8 @@ function ProofPhotos({
 
 export default function FieldSalesPage() {
   const [sales, setSales] = useState<ProductSale[]>([]);
+  /** The sale being corrected, if any. */
+  const [editing, setEditing] = useState<ProductSale | null>(null);
   const [agronomists, setPersons] = useState<Person[]>([]);
   const [who, setWho] = useState(""); // "" = everyone
   // A closed window, not an open-ended "since": a lone date read as a picker
@@ -176,6 +180,9 @@ export default function FieldSalesPage() {
    * round trip would only make the toggle feel slower than it is.
    */
   const [buyerKind, setBuyerKind] = useState<"" | "farmer" | "fpo">("");
+  /** The taluk code a bill was numbered in, e.g. CHM out of Chamarajanagar. */
+  const [code, setCode] = useState("");
+  const [regions, setRegions] = useState<Region[]>([]);
   /** Buyer name or number. Narrowed here, like the kind — the page already
    *  holds every sale it is showing. */
   const [query, setQuery] = useState("");
@@ -186,16 +193,18 @@ export default function FieldSalesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, a] = await Promise.all([
+      const [s, a, r] = await Promise.all([
         api.listProductSales({
           agronomistId: who || undefined,
           from: from || undefined,
           to: to || undefined,
         }),
         api.listAgronomists().catch(() => [] as Person[]),
+        api.listRegions().catch(() => [] as Region[]),
       ]);
       setSales(s);
       setPersons(a);
+      setRegions(r);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load field sales");
@@ -214,6 +223,23 @@ export default function FieldSalesPage() {
     return sales.filter((s) => {
       const buyer = saleBuyer(s);
       if (buyerKind && buyer.kind !== buyerKind) return false;
+      /**
+       * Matched against the bill's own number, not against where the agent
+       * works today. An agronomist who moves taluk keeps their old sales under
+       * the code those bills were actually issued in, which is what anybody
+       * reconciling a paper run needs.
+       */
+      if (code) {
+        const no = (s.invoiceNo ?? "").toUpperCase();
+        // The code has to end where the digits begin, or a taluk coded CH
+        // would swallow every bill belonging to CHM.
+        const isRegional = /^ENP-([A-Z0-9]+?)\d*$/.exec(no);
+        if (code === "__") {
+          if (isRegional) return false;
+        } else if (isRegional?.[1] !== code) {
+          return false;
+        }
+      }
       if (!q) return true;
       // Name or number, whichever kind of buyer it was — searching "Rafk"
       // should find an FPO's sales as readily as a farmer's.
@@ -222,7 +248,22 @@ export default function FieldSalesPage() {
         (!!digits && buyer.mobile.replace(/\D/g, "").includes(digits))
       );
     });
-  }, [sales, buyerKind, query]);
+  }, [sales, buyerKind, code, query]);
+
+  /**
+   * How many of the fetched sales sit under each code, so the dropdown says so
+   * rather than making somebody pick one to find out.
+   */
+  const codeCounts = useMemo(() => {
+    const out: Record<string, number> = { __: 0 };
+    sales.forEach((s) => {
+      const no = (s.invoiceNo ?? "").toUpperCase();
+      const m = no.match(/^ENP-([A-Z0-9]+?)\d*$/);
+      if (m) out[m[1]] = (out[m[1]] ?? 0) + 1;
+      else out.__ += 1;
+    });
+    return out;
+  }, [sales]);
 
   /** How the fetched set splits, so each option can carry its own count. */
   const kinds = useMemo(
@@ -307,6 +348,24 @@ export default function FieldSalesPage() {
             <option value="fpo">FPOs ({kinds.fpo})</option>
           </select>
 
+          <span className="text-zinc-500">Code</span>
+          <select
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+          >
+            <option value="">All</option>
+            {regions.map((r) => (
+              <option key={r._id} value={r.code}>
+                ENP-{r.code} · {r.taluk} ({codeCounts[r.code] ?? 0})
+              </option>
+            ))}
+            {/* The sales numbered before the taluk series existed still have to
+                be findable, and they are the ones an office is most likely to
+                be chasing. */}
+            <option value="__">Older numbering ({codeCounts.__ ?? 0})</option>
+          </select>
+
           <span className="text-zinc-500">Agronomist</span>
           <select
             value={who}
@@ -366,13 +425,14 @@ export default function FieldSalesPage() {
             );
           })}
 
-          {(who || from || to || buyerKind || query) && (
+          {(who || from || to || buyerKind || code || query) && (
             <button
               onClick={() => {
                 setWho("");
                 setFrom("");
                 setTo("");
                 setBuyerKind("");
+                setCode("");
                 setQuery("");
               }}
               className="rounded-lg px-2.5 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
@@ -476,6 +536,14 @@ export default function FieldSalesPage() {
                         <MapPin size={13} /> Map <ExternalLink size={11} />
                       </a>
                     )}
+                    {/* A correction from the office: a quantity typed twice, a
+                        price agreed lower on the field, the wrong buyer. */}
+                    <button
+                      onClick={() => setEditing(s)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                    >
+                      <Pencil size={13} /> Edit
+                    </button>
                     {/* The same PDF the agronomist hands the farmer, so office
                         and field are never reconciling two different bills. */}
                     <a
@@ -588,6 +656,19 @@ export default function FieldSalesPage() {
             );
           })}
         </div>
+      )}
+
+      {/* The corrected sale comes back from the server, so the row redraws with
+          the figures the server computed - not with what the dialog guessed. */}
+      {editing && (
+        <EditSaleDialog
+          sale={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(updated) => {
+            setSales((rows) => rows.map((r) => (r._id === updated._id ? { ...r, ...updated } : r)));
+            setEditing(null);
+          }}
+        />
       )}
     </div>
   );
