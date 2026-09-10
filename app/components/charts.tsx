@@ -39,7 +39,18 @@ export function TrendChart({
   points,
   height = 200,
 }: {
-  points: { label: string; value: number; sales: number }[];
+  points: {
+    label: string;
+    value: number;
+    sales: number;
+    /**
+     * Anything else worth reading for that day, in the order it should appear
+     * under the takings — "3 farmers onboarded · Haider 2, Teja 1", "5 farm
+     * visits". A day's money is rarely the whole story, and the hover is where
+     * somebody is already looking when they ask why a spike happened.
+     */
+    notes?: string[];
+  }[];
   height?: number;
 }) {
   const gid = useId();
@@ -172,6 +183,11 @@ export function TrendChart({
             {money(points[hover].value)} · {points[hover].sales} sale
             {points[hover].sales === 1 ? "" : "s"}
           </div>
+          {points[hover].notes?.map((n, i) => (
+            <div key={i} className="text-zinc-500">
+              {n}
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
@@ -225,6 +241,156 @@ export function RankedBars({
       ))}
     </div>
   );
+}
+
+/**
+ * The four validated hues, in the order they are handed out.
+ *
+ * Assigned in fixed order and never cycled: a fifth slice does not get a
+ * generated colour, it folds into "Other". Both modes cleared the palette
+ * validator's colour-blindness, lightness and contrast checks - they were not
+ * eyeballed.
+ */
+const SLICE_HUES = ["var(--viz-1)", "var(--viz-2)", "var(--viz-3)", "var(--viz-4)"];
+
+/** x,y on a circle, with 0° at twelve o'clock rather than three. */
+const onCircle = (cx: number, cy: number, r: number, turns: number) => {
+  const a = turns * 2 * Math.PI - Math.PI / 2;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+};
+
+/**
+ * A part-to-whole ring: where a period's money came from.
+ *
+ * A ring rather than a pie, and never more than four slices. People read arc
+ * LENGTH far better than arc area, and a fifth slice would need a hue the
+ * validated palette does not have - so the tail is grouped into "Other" and
+ * every slice is labelled with its own figure beside the ring. The ring itself
+ * carries the shape of the split; the numbers do the precise work.
+ *
+ * A single slice at 100% is drawn as a plain circle: an arc that starts and
+ * ends at the same point renders as nothing at all in SVG.
+ */
+export function DonutChart({
+  slices,
+  total,
+  centreLabel,
+}: {
+  slices: { label: string; value: number }[];
+  total: number;
+  centreLabel: string;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+
+  const shown = slices.filter((s) => s.value > 0);
+  if (!shown.length || total <= 0) {
+    return (
+      <div className="flex h-[168px] items-center justify-center text-sm text-zinc-400">
+        Nothing to split yet
+      </div>
+    );
+  }
+
+  const SIZE = 168;
+  const c = SIZE / 2;
+  const R = 74;
+  const THICK = 26;
+
+  // Each slice starts where every slice before it ended, worked out from the
+  // list rather than from a running variable - a value mutated during render is
+  // a value that can be left half-updated when React re-renders mid-pass.
+  const arcs = shown.map((s, i) => {
+    const before = shown.slice(0, i).reduce((n, x) => n + x.value, 0) / total;
+    const frac = s.value / total;
+    const from = before;
+    const to = before + frac;
+    const [x0, y0] = onCircle(c, c, R, from);
+    const [x1, y1] = onCircle(c, c, R, to);
+    const large = frac > 0.5 ? 1 : 0;
+    return {
+      ...s,
+      frac,
+      hue: SLICE_HUES[i % SLICE_HUES.length],
+      // A full circle has no arc to draw - two identical points would vanish.
+      d:
+        frac >= 0.999
+          ? `M ${c - R} ${c} A ${R} ${R} 0 1 1 ${c + R} ${c} A ${R} ${R} 0 1 1 ${c - R} ${c}`
+          : `M ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1}`,
+    };
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-5">
+      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE} role="img" className="shrink-0">
+        {arcs.map((a, i) => (
+          <path
+            key={i}
+            d={a.d}
+            fill="none"
+            stroke={a.hue}
+            strokeWidth={hover === i ? THICK + 6 : THICK}
+            strokeLinecap="butt"
+            opacity={hover === null || hover === i ? 1 : 0.45}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+            className="transition-[stroke-width,opacity]"
+          />
+        ))}
+        {/* The total sits where the pie's middle would have been - the one
+            number everybody looks for, in the space a ring gives back. */}
+        <text
+          x={c}
+          y={c - 2}
+          textAnchor="middle"
+          className="fill-zinc-900 text-[15px] font-semibold dark:fill-zinc-100"
+        >
+          {hover === null ? money(total) : money(arcs[hover].value)}
+        </text>
+        <text x={c} y={c + 14} textAnchor="middle" className="fill-zinc-400 text-[10px]">
+          {hover === null ? centreLabel : `${Math.round(arcs[hover].frac * 100)}% · ${arcs[hover].label}`}
+        </text>
+      </svg>
+
+      {/* Every slice labelled: four rows are quicker to read than four arcs,
+          and identity never rests on colour alone. */}
+      <div className="min-w-[9rem] flex-1 space-y-1.5">
+        {arcs.map((a, i) => (
+          <div
+            key={i}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+            className={`flex items-center gap-2 text-sm ${hover === i ? "" : "opacity-90"}`}
+          >
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: a.hue }}
+              aria-hidden
+            />
+            <span className="min-w-0 flex-1 truncate" title={a.label}>
+              {a.label}
+            </span>
+            <span className="shrink-0 tabular-nums text-zinc-500">
+              {Math.round(a.frac * 100)}%
+            </span>
+            <span className="shrink-0 font-medium tabular-nums">{shortMoney(a.value)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The top few by value, with everything else folded into one row.
+ *
+ * Four is the ceiling because the palette holds four validated hues; a fifth
+ * would mean inventing one.
+ */
+export function topSlices(rows: { label: string; value: number }[], keep = 3) {
+  const sorted = [...rows].filter((r) => r.value > 0).sort((a, b) => b.value - a.value);
+  if (sorted.length <= keep + 1) return sorted;
+  const rest = sorted.slice(keep).reduce((n, r) => n + r.value, 0);
+  return [...sorted.slice(0, keep), { label: `Other (${sorted.length - keep})`, value: rest }];
 }
 
 function Empty({ height }: { height: number }) {

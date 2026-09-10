@@ -302,10 +302,7 @@ export default function VisitsPage() {
                       {/* Why, whichever decision it was. A farmer taken off the
                           day without a reason is the thing this replaces. */}
                       {state === "skipped" && v.farmer?.skipReason ? (
-                        <div
-                          className="mt-1 max-w-[14rem] truncate text-xs text-zinc-500"
-                          title={v.farmer.skipReason}
-                        >
+                        <div className="mt-1 max-w-[16rem] whitespace-pre-line text-xs leading-snug text-zinc-500">
                           {v.farmer.skipReason}
                         </div>
                       ) : v.followUpNote || v.farmer?.followUpNote ? (
@@ -320,14 +317,15 @@ export default function VisitsPage() {
                          * blank however much the agent had written. The note is
                          * now required on every visit, so it is always worth
                          * showing, date or no date.
+                         *
+                         * Shown in full rather than clipped to two lines with
+                         * the rest behind a hover: remarks are the agent's
+                         * account of what they found, and the office reads them
+                         * to decide what to do next. A note you have to hover to
+                         * finish is a note that gets skipped.
                          */
-                        <div
-                          className="mt-1 max-w-[14rem] text-xs text-zinc-500"
-                          title={v.followUpNote || v.farmer?.followUpNote}
-                        >
-                          <span className="line-clamp-2">
-                            {v.followUpNote || v.farmer?.followUpNote}
-                          </span>
+                        <div className="mt-1 max-w-[16rem] whitespace-pre-line text-xs leading-snug text-zinc-500">
+                          {v.followUpNote || v.farmer?.followUpNote}
                         </div>
                       ) : null}
                       {v.farmer?._id ? (

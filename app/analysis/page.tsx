@@ -5,14 +5,18 @@ import {
   BarChart3,
   CalendarDays,
   Download,
+  PieChart,
   RefreshCw,
+  Repeat,
   Search,
   TrendingUp,
+  Users,
 } from "lucide-react";
 
-import { api, Person, ProductSale, saleBuyer } from "../lib/api";
+import { api, Person, ProductSale, saleBuyer, Visit } from "../lib/api";
+import { AcresCovered } from "../components/acres-covered";
 import { isLateEntry, lateEntryDays, LateEntryTag } from "../components/late-entry-tag";
-import { money, RankedBars, shortMoney, TrendChart } from "../components/charts";
+import { DonutChart, money, RankedBars, shortMoney, topSlices, TrendChart } from "../components/charts";
 
 /**
  * A period ending today, as the two yyyy-mm-dd ends of a closed window.
@@ -55,6 +59,10 @@ const dayKey = (d: string) => iso(new Date(d));
 export default function AnalysisPage() {
   const [sales, setSales] = useState<ProductSale[]>([]);
   const [agronomists, setAgronomists] = useState<Person[]>([]);
+  /** Farmers registered inside the window, for the per-day hover. */
+  const [onboarded, setOnboarded] = useState<Person[]>([]);
+  /** Visits made inside the window, same purpose. */
+  const [visits, setVisits] = useState<Visit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,7 +86,18 @@ export default function AnalysisPage() {
     async (stale?: () => boolean) => {
       setLoading(true);
       try {
-        const [s, a] = await Promise.all([
+        /**
+         * Sales are the subject, but a day's takings rarely explain themselves.
+         * The farmers registered that day and the visits made that day are
+         * fetched for the same window so the hover can say what else happened -
+         * a spike after four onboardings reads very differently from one after
+         * none.
+         *
+         * Both are best-effort: a chart that refuses to draw because a
+         * secondary count failed would be worse than one without the extra
+         * lines.
+         */
+        const [s, a, f, v] = await Promise.all([
           api.listProductSales({
             agronomistId: who || undefined,
             from: from || undefined,
@@ -86,10 +105,19 @@ export default function AnalysisPage() {
             withAcres: true,
           }),
           api.listAgronomists().catch(() => [] as Person[]),
+          from && to
+            ? api
+                .listFarmersPage({ from, to, page: 1, limit: 500 })
+                .then((r) => r.items)
+                .catch(() => [] as Person[])
+            : Promise.resolve([] as Person[]),
+          from && to ? api.listVisits({ from, to }).catch(() => [] as Visit[]) : Promise.resolve([] as Visit[]),
         ]);
         if (stale?.()) return;
         setSales(s);
         setAgronomists(a);
+        setOnboarded(f);
+        setVisits(v);
         setError(null);
       } catch (e) {
         if (!stale?.()) setError(e instanceof Error ? e.message : "Failed to load sales");
@@ -202,23 +230,154 @@ export default function AnalysisPage() {
       byDay.set(k, { value: cur.value + (s.total ?? 0), sales: cur.sales + 1 });
     });
 
+    /**
+     * Who registered farmers that day, by name, and how many visits were made.
+     *
+     * Named rather than merely counted: "3 farmers onboarded" prompts the
+     * question "by whom" every single time, and the answer is already here.
+     */
+    const onboardedByDay = new Map<string, Map<string, number>>();
+    onboarded.forEach((f) => {
+      const k = dayKey(f.createdAt);
+      const who = f.onboardedBy?.name ?? "from the dashboard";
+      const day = onboardedByDay.get(k) ?? new Map<string, number>();
+      day.set(who, (day.get(who) ?? 0) + 1);
+      onboardedByDay.set(k, day);
+    });
+
+    const visitsByDay = new Map<string, number>();
+    visits.forEach((v) => {
+      const k = dayKey(v.visitedAt);
+      visitsByDay.set(k, (visitsByDay.get(k) ?? 0) + 1);
+    });
+
     // Every day in the window, not only the ones with a sale — a line that
     // skips empty days reads as steady trade when trade actually stopped.
-    const out: { label: string; value: number; sales: number }[] = [];
+    const out: { label: string; value: number; sales: number; notes: string[] }[] = [];
     const cursor = new Date(`${from}T00:00:00`);
     const end = new Date(`${to}T00:00:00`);
     let guard = 0;
     while (cursor <= end && guard++ < 400) {
       const k = iso(cursor);
       const hit = byDay.get(k) ?? { value: 0, sales: 0 };
+
+      const notes: string[] = [];
+      const who = onboardedByDay.get(k);
+      if (who) {
+        const heads = [...who.values()].reduce((n, x) => n + x, 0);
+        const names = [...who.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, n]) => `${name} ${n}`)
+          .join(", ");
+        notes.push(`${heads} farmer${heads === 1 ? "" : "s"} onboarded · ${names}`);
+      }
+      const made = visitsByDay.get(k) ?? 0;
+      if (made) notes.push(`${made} farm visit${made === 1 ? "" : "s"}`);
+
       out.push({
         label: cursor.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
         ...hit,
+        notes,
       });
       cursor.setDate(cursor.getDate() + 1);
     }
     return out;
-  }, [rows, from, to]);
+  }, [rows, from, to, onboarded, visits]);
+
+  /**
+   * Where the money came from, as parts of one whole.
+   *
+   * Two questions only, because only two are genuinely part-to-whole: which
+   * products the revenue came from, and whether it came from farmers or FPOs.
+   * Everything else on this page is a comparison of magnitudes, which a bar
+   * answers better than an arc.
+   */
+  const split = useMemo(() => {
+    const byProduct = new Map<string, number>();
+    let farmers = 0;
+    let fpos = 0;
+    rows.forEach((s) => {
+      s.items.forEach((i) =>
+        byProduct.set(i.name, (byProduct.get(i.name) ?? 0) + (i.lineTotal ?? 0))
+      );
+      if (saleBuyer(s).kind === "fpo") fpos += s.total ?? 0;
+      else farmers += s.total ?? 0;
+    });
+    return {
+      products: topSlices([...byProduct.entries()].map(([label, value]) => ({ label, value }))),
+      buyers: [
+        { label: "Farmers", value: Math.round(farmers * 100) / 100 },
+        { label: "FPOs", value: Math.round(fpos * 100) / 100 },
+      ].filter((b) => b.value > 0),
+    };
+  }, [rows]);
+
+  /**
+   * Buyers who came back.
+   *
+   * Counted by buyer, not by sale: somebody who bought three times is one
+   * returning customer, and the number worth reporting is how many of the
+   * people we sold to came back at all - retention, not volume.
+   *
+   * Identified by id where there is one, falling back to the name a sale
+   * snapshots. Two different farmers with the same name would be merged by that
+   * fallback; it only applies to records old enough to have no buyer linked, and
+   * counting those separately would be worse.
+   */
+  const repeat = useMemo(() => {
+    const byBuyer = new Map<
+      string,
+      { name: string; kind: "farmer" | "fpo"; times: number; value: number; place: string }
+    >();
+
+    rows.forEach((s) => {
+      const b = saleBuyer(s);
+      const key = b.id ?? `name:${b.name}`;
+      if (!b.name) return;
+      const cur = byBuyer.get(key) ?? {
+        name: b.name,
+        kind: b.kind,
+        times: 0,
+        value: 0,
+        // Taluk and district, whichever this buyer actually has - rural
+        // addresses are part-filled more often than not.
+        place:
+          [regionOf(s, "taluk"), regionOf(s, "district")].filter(Boolean).join(", ") ||
+          "No place recorded",
+      };
+      cur.times += 1;
+      cur.value += s.total ?? 0;
+      // A place recorded on any of a buyer's sales beats none on the first.
+      if (cur.place === "No place recorded") {
+        cur.place =
+          [regionOf(s, "taluk"), regionOf(s, "district")].filter(Boolean).join(", ") ||
+          cur.place;
+      }
+      byBuyer.set(key, cur);
+    });
+
+    const all = [...byBuyer.values()];
+    const returning = all.filter((b) => b.times > 1).sort((a, b) => b.times - a.times || b.value - a.value);
+
+    // Where the returning buyers are, by district: the question "who comes
+    // back" is nearly always followed by "and from where".
+    const byPlace = new Map<string, { buyers: number; value: number }>();
+    returning.forEach((b) => {
+      const key = b.place;
+      const cur = byPlace.get(key) ?? { buyers: 0, value: 0 };
+      byPlace.set(key, { buyers: cur.buyers + 1, value: cur.value + b.value });
+    });
+
+    return {
+      buyers: all.length,
+      returning,
+      /** What the returning buyers are worth, against everything sold. */
+      value: Math.round(returning.reduce((n, b) => n + b.value, 0) * 100) / 100,
+      places: [...byPlace.entries()]
+        .map(([label, v]) => ({ label, ...v }))
+        .sort((a, b) => b.buyers - a.buyers || b.value - a.value),
+    };
+  }, [rows]);
 
   /** Ranked totals, highest first, for each way of cutting the same money. */
   const cuts = useMemo(() => {
@@ -459,6 +618,13 @@ export default function AnalysisPage() {
               Clear filters
             </button>
           )}
+
+          {/* The same lookup the Farmers tab carries, and the same component -
+              two screens answering "acres covered" differently would be worse
+              than either answer alone. */}
+          <div className="ml-auto">
+            <AcresCovered agronomists={agronomists} />
+          </div>
         </div>
       </div>
 
@@ -501,13 +667,118 @@ export default function AnalysisPage() {
           <TrendingUp size={16} className="text-green-600" />
           <h3 className="font-semibold">Sales per day</h3>
           <span className="text-xs text-zinc-500">
-            {trend.length} day{trend.length === 1 ? "" : "s"} · hover for a day&apos;s takings
+            {trend.length} day{trend.length === 1 ? "" : "s"} · hover for a day&apos;s takings,
+            onboardings and visits
           </span>
         </div>
         {loading ? (
           <div className="h-[200px] animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-900" />
         ) : (
           <TrendChart points={trend} />
+        )}
+      </div>
+
+      {/* Part-to-whole, where the question really is "how does it split". */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="mb-3 flex items-center gap-2">
+            <PieChart size={16} className="text-green-600" />
+            <h3 className="font-semibold">Where the money came from</h3>
+            <span className="text-xs text-zinc-500">by product</span>
+          </div>
+          {loading ? (
+            <div className="h-[168px] animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-900" />
+          ) : (
+            <DonutChart slices={split.products} total={kpi.revenue} centreLabel="total revenue" />
+          )}
+        </div>
+
+        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="mb-3 flex items-center gap-2">
+            <Users size={16} className="text-green-600" />
+            <h3 className="font-semibold">Who bought it</h3>
+            <span className="text-xs text-zinc-500">farmers against FPOs</span>
+          </div>
+          {loading ? (
+            <div className="h-[168px] animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-900" />
+          ) : (
+            <DonutChart slices={split.buyers} total={kpi.revenue} centreLabel="total revenue" />
+          )}
+        </div>
+      </div>
+
+      {/* Who came back, and where they are. */}
+      <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Repeat size={16} className="text-green-600" />
+          <h3 className="font-semibold">Repeat buyers</h3>
+          <span className="text-xs text-zinc-500">bought from us more than once</span>
+          {repeat.buyers > 0 && (
+            <span className="ml-auto flex items-center gap-2 rounded-lg bg-green-50 px-3 py-1.5 text-sm font-semibold text-green-800 dark:bg-green-950/40 dark:text-green-300">
+              {repeat.returning.length} of {repeat.buyers} buyers
+              <span className="text-xs font-normal text-green-700/70 dark:text-green-400/70">
+                {Math.round((repeat.returning.length / repeat.buyers) * 100)}% came back ·{" "}
+                {money(repeat.value)}
+              </span>
+            </span>
+          )}
+        </div>
+
+        {repeat.returning.length === 0 ? (
+          <p className="py-6 text-center text-sm text-zinc-400">
+            Nobody has bought twice in this period yet.
+          </p>
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
+                  <tr>
+                    <th className="py-2 pr-3 font-medium">Buyer</th>
+                    <th className="px-3 py-2 font-medium">Place</th>
+                    <th className="px-3 py-2 text-right font-medium">Times</th>
+                    <th className="py-2 pl-3 text-right font-medium">Spent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {repeat.returning.slice(0, 10).map((b, i) => (
+                    <tr key={i} className="border-b border-zinc-100 last:border-0 dark:border-zinc-900">
+                      <td className="py-2 pr-3">
+                        <span className="font-medium">{b.name}</span>
+                        {b.kind === "fpo" && (
+                          <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                            FPO
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-500">{b.place}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{b.times}</td>
+                      <td className="py-2 pl-3 text-right tabular-nums">{money(b.value)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {repeat.returning.length > 10 && (
+                <p className="mt-2 text-xs text-zinc-400">
+                  and {repeat.returning.length - 10} more — the full list is in the export
+                </p>
+              )}
+            </div>
+
+            <div>
+              <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+                Where they are
+              </div>
+              <RankedBars
+                rows={repeat.places.slice(0, 8).map((p) => ({
+                  label: p.label,
+                  value: p.value,
+                  sub: `${p.buyers} repeat buyer${p.buyers === 1 ? "" : "s"}`,
+                }))}
+                emptyLabel="No places recorded"
+              />
+            </div>
+          </div>
         )}
       </div>
 

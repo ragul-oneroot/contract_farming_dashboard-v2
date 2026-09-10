@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { FollowUpDialog } from "./follow-up-dialog";
 import { PhotoLightbox } from "./photo-lightbox";
-import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays, CalendarClock, MapPin } from "lucide-react";
+import { RefreshCw, Search, ChevronLeft, ChevronRight, ArrowRight, Plus, X, CalendarDays, CalendarClock, MapPin, Sprout } from "lucide-react";
 import { api, CatalogCrop, missingDetails, Person, Region } from "../lib/api";
+import { AcresCovered } from "./acres-covered";
 import { RegionsDialog } from "./regions-dialog";
 import { AudioPlayer } from "./audio-player";
 
@@ -470,6 +471,14 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           </button>
         )}
       </div>
+
+      {/* How much land one agronomist covers. Shared with Sales Analysis, so
+          the two screens can never answer it differently. */}
+      {showDetail && (
+        <div className="border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+          <AcresCovered agronomists={agronomists} />
+        </div>
+      )}
 
       {/* Table */}
       {/* Fixed height with the header pinned: twenty rows plus filters and a

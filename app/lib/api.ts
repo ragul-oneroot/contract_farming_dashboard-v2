@@ -544,6 +544,11 @@ export type Paged<T> = {
   page: number;
   limit: number;
   hasMore: boolean;
+  /**
+   * Figures for everything the filter matches, not just this page — sent by
+   * the endpoints that can work them out without a second round trip.
+   */
+  totals?: { acres?: number; crops?: number };
 };
 
 export type FpoPage = {
