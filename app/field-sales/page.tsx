@@ -60,6 +60,8 @@ function daysBack(days: number) {
  * backwards out of it, exactly as the app and the PDF do.
  */
 const taxableOf = (inclusive: number) => round2(inclusive / 1.05);
+/** Courier and packaging carry 18%, their own supply at their own rate. */
+const chargesTaxableOf = (inclusive: number) => round2(inclusive / 1.18);
 
 /**
  * The bill behind one sale.
@@ -72,15 +74,26 @@ const taxableOf = (inclusive: number) => round2(inclusive / 1.05);
 function billOf(s: ProductSale) {
   const subtotalInclusive = round2(s.items.reduce((n, i) => n + (i.lineTotal ?? 0), 0));
   const total = round2(s.total ?? 0);
-  const taxable = taxableOf(total);
-  const cgst = round2(taxable * 0.025);
+  // The courier is taxed at 18%, apart from the products at 5%, so it is
+  // split off first and the products' figures are worked out on what is left.
+  const charges = round2(s.otherCharges ?? 0);
+  const chargesEx = chargesTaxableOf(charges);
+  const cgst18 = round2(chargesEx * 0.09);
+  const sgst18 = round2(charges - chargesEx - cgst18);
+  const goods = round2(total - charges);
+  const goodsTaxable = taxableOf(goods);
+  const cgst = round2(goodsTaxable * 0.025);
   const subtotalEx = taxableOf(subtotalInclusive);
   return {
     subtotalEx,
-    saleOffEx: round2(subtotalEx - taxable),
-    taxable,
+    chargesEx,
+    saleOffEx: round2(subtotalEx - goodsTaxable),
+    goodsTaxable,
+    taxable: round2(goodsTaxable + chargesEx),
     cgst,
-    sgst: round2(total - taxable - cgst),
+    sgst: round2(goods - goodsTaxable - cgst),
+    cgst18,
+    sgst18,
   };
 }
 
@@ -640,15 +653,24 @@ export default function FieldSalesPage() {
                         tone="text-red-600"
                       />
                     ) : null}
+                    {bill.chargesEx > 0 ? (
+                      <Row label="Courier / other charges" value={`+ ${money(bill.chargesEx)}`} />
+                    ) : null}
                     <Row label="Taxable value" value={money(bill.taxable)} />
                     <Row label="CGST 2.5%" value={money(bill.cgst)} />
                     <Row label="SGST 2.5%" value={money(bill.sgst)} />
+                    {bill.chargesEx > 0 ? (
+                      <>
+                        <Row label="CGST 9% (courier)" value={money(bill.cgst18)} />
+                        <Row label="SGST 9% (courier)" value={money(bill.sgst18)} />
+                      </>
+                    ) : null}
                     <div className="mt-1 flex items-center justify-between border-t border-zinc-200 pt-1.5 dark:border-zinc-700">
                       <span className="font-semibold">Total payable</span>
                       <span className="text-base font-bold text-green-600">{money(s.total)}</span>
                     </div>
                     <div className="text-right text-[11px] text-zinc-400">
-                      Prices include 5% GST
+                      Products include 5% GST · courier 18%
                     </div>
                   </div>
                 </div>

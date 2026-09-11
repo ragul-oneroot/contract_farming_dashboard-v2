@@ -108,12 +108,22 @@ export type Practice = {
   steps: PopStep[];
 };
 
+/**
+ * One pack size of a product with its own price — the 500 ml, 1 L and 5 L of
+ * the same pesticide. `label` is a name, not a quantity: nothing is computed
+ * from it.
+ */
+export type ProductVariant = { _id: string; label: string; price: number };
+
 export type Product = {
   _id: string;
   name: string;
   description: string;
+  /** Price and unit when sold in one size; ignored once `variants` has entries. */
   price: number;
   unit: string;
+  /** The pack sizes this product comes in. Empty = sold in one size only. */
+  variants: ProductVariant[];
   imageUrl: string;
   crops: string[]; // crop names this product is mapped to; empty = all crops
   dayStart: number | null; // usage window in days from planting
@@ -370,6 +380,8 @@ export type Visit = {
 /** One product line in a field sale, with its own before/after crop photos. */
 export type ProductSaleItem = {
   product: string;
+  /** Which pack size, when the product has them; the label is in `unit`. */
+  variant?: string | null;
   name: string;
   unit: string;
   imageUrl: string;
@@ -469,6 +481,8 @@ export type ProductSale = {
   discount?: number;
   discountType?: "rs" | "pct";
   discountAmount?: number;
+  /** Courier / packaging / other charges on top, GST-inclusive. Absent on older sales. */
+  otherCharges?: number;
   /** What the farmer paid, GST included. */
   total: number;
   location: { latitude: number | null; longitude: number | null };
@@ -911,9 +925,18 @@ export const api = {
   updateProductSale: (
     id: string,
     body: {
-      items: { productId: string; qty: number; unitPrice: number; discount?: number; discountType?: "rs" | "pct" }[];
+      items: {
+        productId: string;
+        variantId?: string | null;
+        qty: number;
+        unitPrice: number;
+        discount?: number;
+        discountType?: "rs" | "pct";
+      }[];
       discount?: number;
       discountType?: "rs" | "pct";
+      /** Courier / other charges. Omit to leave the stored figure alone. */
+      otherCharges?: number;
       /** One buyer, never both. Send neither to leave the sale where it is. */
       farmerId?: string | null;
       fpoId?: string | null;

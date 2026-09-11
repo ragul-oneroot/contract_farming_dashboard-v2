@@ -17,6 +17,8 @@ const money = (n: number) =>
 
 type Line = {
   productId: string;
+  /** Which pack size, on a product that has them. Null otherwise. */
+  variantId: string | null;
   name: string;
   qty: string;
   unitPrice: string;
@@ -25,6 +27,30 @@ type Line = {
   /** Whether this line already carries a handover photo, which an edit keeps. */
   hasPhoto: boolean;
 };
+
+/**
+ * Everything that can be put on a line: a product sold in one size is one
+ * option, a product with sizes is one option per size. The office picks from
+ * these the same way the agronomist does in the field.
+ */
+type Offer = { key: string; productId: string; variantId: string | null; name: string; price: number };
+
+const offerKey = (productId: string, variantId: string | null | undefined) =>
+  `${productId}|${variantId ?? ""}`;
+
+function offersOf(catalog: Product[]): Offer[] {
+  return catalog.flatMap((p): Offer[] =>
+    p.variants && p.variants.length > 0
+      ? p.variants.map((v) => ({
+          key: offerKey(p._id, v._id),
+          productId: p._id,
+          variantId: v._id,
+          name: `${p.name} — ${v.label}`,
+          price: v.price,
+        }))
+      : [{ key: offerKey(p._id, null), productId: p._id, variantId: null, name: p.name, price: p.price }]
+  );
+}
 
 /** One line of the totals ladder. */
 function Line({ label, value, tone }: { label: string; value: string; tone?: string }) {
@@ -84,7 +110,8 @@ export function EditSaleDialog({
   const [lines, setLines] = useState<Line[]>(() =>
     sale.items.map((it) => ({
       productId: it.product,
-      name: it.name,
+      variantId: it.variant ?? null,
+      name: [it.name, it.unit].filter(Boolean).join(" — "),
       qty: String(it.qty ?? 1),
       unitPrice: String(it.unitPrice ?? 0),
       discount: it.discount ? String(it.discount) : "",
@@ -96,6 +123,8 @@ export function EditSaleDialog({
   const [basketOffType, setBasketOffType] = useState<"rs" | "pct">(
     sale.discountType === "pct" ? "pct" : "rs"
   );
+  /** Courier / packaging / other charges, in rupees, GST-inclusive. */
+  const [charges, setCharges] = useState(sale.otherCharges ? String(sale.otherCharges) : "");
   const [soldAt, setSoldAt] = useState(asInputDate(sale.soldAt));
   const [notes, setNotes] = useState(sale.notes ?? "");
   const [reason, setReason] = useState("");
@@ -130,7 +159,11 @@ export function EditSaleDialog({
       subtotal,
       round2(basketOffType === "pct" ? (subtotal * enteredBasket) / 100 : enteredBasket)
     );
-    const total = round2(subtotal - basket);
+    // On after the discount, the same place the server adds it, so a
+    // percentage off is off the products alone.
+    const extra = Math.max(0, round2(Number(charges) || 0));
+    const goods = round2(subtotal - basket);
+    const total = round2(goods + extra);
 
     /**
      * The same ladder the sale's own row shows, so nobody has to hold two
@@ -141,32 +174,41 @@ export function EditSaleDialog({
      * only this way is Subtotal − discount guaranteed to land exactly on the
      * taxable value with no crumb left on screen.
      */
-    const taxable = taxableOf(total);
-    const cgst = round2(taxable * 0.025);
+    // Products at 5%, the courier at 18% — two groups, each split on its own.
+    const goodsTaxable = taxableOf(goods);
+    const cgst = round2(goodsTaxable * 0.025);
     const subtotalEx = taxableOf(subtotal);
+    const chargesEx = round2(extra / 1.18);
+    const cgst18 = round2(chargesEx * 0.09);
     return {
       rows,
       subtotal,
       basket,
       total,
       subtotalEx,
-      basketEx: round2(subtotalEx - taxable),
-      taxable,
+      chargesEx,
+      basketEx: round2(subtotalEx - goodsTaxable),
+      taxable: round2(goodsTaxable + chargesEx),
       cgst,
-      sgst: round2(total - taxable - cgst),
+      sgst: round2(goods - goodsTaxable - cgst),
+      cgst18,
+      sgst18: round2(extra - chargesEx - cgst18),
     };
-  }, [lines, basketOff, basketOffType]);
+  }, [lines, basketOff, basketOffType, charges]);
 
   const set = (i: number, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l, n) => (n === i ? { ...l, ...patch } : l)));
 
+  const offers = offersOf(catalog);
+
   const addLine = () => {
-    const first = catalog[0];
+    const first = offers[0];
     if (!first) return;
     setLines((ls) => [
       ...ls,
       {
-        productId: first._id,
+        productId: first.productId,
+        variantId: first.variantId,
         name: first.name,
         qty: "1",
         unitPrice: String(first.price ?? 0),
@@ -196,6 +238,7 @@ export function EditSaleDialog({
       const updated = await api.updateProductSale(sale._id, {
         items: lines.map((l) => ({
           productId: l.productId,
+          variantId: l.variantId,
           qty: Number(l.qty) || 0,
           unitPrice: Number(l.unitPrice) || 0,
           discount: Math.max(0, Number(l.discount) || 0),
@@ -203,6 +246,7 @@ export function EditSaleDialog({
         })),
         discount: Math.max(0, Number(basketOff) || 0),
         discountType: basketOffType,
+        otherCharges: Math.max(0, Number(charges) || 0),
         // One buyer, never both — the server refuses a request carrying two.
         farmerId: buyerKind === "farmer" ? farmerId : null,
         fpoId: buyerKind === "fpo" ? fpoId : null,
@@ -352,25 +396,27 @@ export function EditSaleDialog({
                   <tr key={i} className="border-b border-zinc-100 last:border-0 dark:border-zinc-900">
                     <td className="px-3 py-2">
                       <select
-                        value={l.productId}
+                        value={offerKey(l.productId, l.variantId)}
                         onChange={(e) => {
-                          const p = catalog.find((c) => c._id === e.target.value);
+                          const o = offers.find((x) => x.key === e.target.value);
+                          if (!o) return;
                           set(i, {
-                            productId: e.target.value,
-                            name: p?.name ?? l.name,
-                            unitPrice: p ? String(p.price ?? 0) : l.unitPrice,
+                            productId: o.productId,
+                            variantId: o.variantId,
+                            name: o.name,
+                            unitPrice: String(o.price ?? 0),
                           });
                         }}
-                        className="w-44 rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+                        className="w-52 rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
                       >
-                        {/* The sale's own product stays selectable even if it has
-                            since been removed from the catalogue. */}
-                        {!catalog.some((c) => c._id === l.productId) && (
-                          <option value={l.productId}>{l.name}</option>
+                        {/* The sale's own product (and size) stays selectable
+                            even if it has since been removed from the catalogue. */}
+                        {!offers.some((o) => o.key === offerKey(l.productId, l.variantId)) && (
+                          <option value={offerKey(l.productId, l.variantId)}>{l.name}</option>
                         )}
-                        {catalog.map((c) => (
-                          <option key={c._id} value={c._id}>
-                            {c.name}
+                        {offers.map((o) => (
+                          <option key={o.key} value={o.key}>
+                            {o.name}
                           </option>
                         ))}
                       </select>
@@ -436,6 +482,17 @@ export function EditSaleDialog({
           </button>
 
           <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-900/50">
+            <div className="flex flex-wrap gap-4">
+            <label className="text-sm">
+              <span className={label}>Courier / other charges (₹)</span>
+              <input
+                value={charges}
+                onChange={(e) => setCharges(e.target.value)}
+                placeholder="0"
+                inputMode="decimal"
+                className="w-24 rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+              />
+            </label>
             <label className="text-sm">
               <span className={label}>Discount on the whole basket</span>
               <div className="flex items-center gap-1">
@@ -456,6 +513,7 @@ export function EditSaleDialog({
                 </select>
               </div>
             </label>
+            </div>
             {/* The whole ladder, as the row and the printed bill show it — not
                 just the figure at the bottom. Somebody correcting a sale is
                 usually checking the tax too. */}
@@ -464,9 +522,18 @@ export function EditSaleDialog({
               {preview.basketEx > 0 && (
                 <Line label="Less : Discount" value={`− ${money(preview.basketEx)}`} tone="text-red-600" />
               )}
+              {preview.chargesEx > 0 && (
+                <Line label="Add : Courier / other charges" value={`+ ${money(preview.chargesEx)}`} />
+              )}
               <Line label="Taxable value" value={money(preview.taxable)} />
               <Line label="CGST 2.5%" value={money(preview.cgst)} />
               <Line label="SGST 2.5%" value={money(preview.sgst)} />
+              {preview.chargesEx > 0 && (
+                <>
+                  <Line label="CGST 9% (courier)" value={money(preview.cgst18)} />
+                  <Line label="SGST 9% (courier)" value={money(preview.sgst18)} />
+                </>
+              )}
               <div className="mt-1 flex items-center justify-between gap-6 border-t border-zinc-200 pt-1.5 dark:border-zinc-700">
                 <span className="font-semibold">Total payable</span>
                 <span className="text-base font-bold text-green-600">{money(preview.total)}</span>
@@ -476,7 +543,7 @@ export function EditSaleDialog({
                   was {money(sale.total)}
                 </div>
               )}
-              <div className="text-right text-[11px] text-zinc-400">Prices include 5% GST</div>
+              <div className="text-right text-[11px] text-zinc-400">Products include 5% GST · courier 18%</div>
             </div>
           </div>
 
