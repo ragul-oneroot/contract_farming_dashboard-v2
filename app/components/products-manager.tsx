@@ -4,12 +4,21 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, Pencil, X, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, Product } from "../lib/api";
 
+/**
+ * A size row as typed. Strings, so a field can be empty mid-edit without
+ * snapping to 0. `_id` is kept on rows loaded from the server: sales already
+ * made in that size point at it, and a fresh id on every save would orphan them.
+ */
+type VariantRow = { _id?: string; label: string; price: string };
+
 type FormState = {
   id: string | null;
   name: string;
   description: string;
   price: string;
   unit: string;
+  /** Pack sizes. Empty = the product is sold in one size, at `price`. */
+  variants: VariantRow[];
   crops: string[]; // crop names this product is mapped to
   file: File | null;
   preview: string; // existing imageUrl or object URL of a new file
@@ -21,6 +30,7 @@ const emptyForm = (): FormState => ({
   description: "",
   price: "",
   unit: "",
+  variants: [],
   crops: [],
   file: null,
   preview: "",
@@ -83,6 +93,16 @@ export function ProductsManager() {
     }));
   }
 
+  const setVariant = (i: number, patch: Partial<VariantRow>) =>
+    setForm((f) => ({
+      ...f,
+      variants: f.variants.map((v, j) => (j === i ? { ...v, ...patch } : v)),
+    }));
+  const addVariant = () =>
+    setForm((f) => ({ ...f, variants: [...f.variants, { label: "", price: "" }] }));
+  const removeVariant = (i: number) =>
+    setForm((f) => ({ ...f, variants: f.variants.filter((_, j) => j !== i) }));
+
   function openNew() {
     setForm(emptyForm());
     setError(null);
@@ -96,6 +116,7 @@ export function ProductsManager() {
       description: p.description,
       price: String(p.price),
       unit: p.unit,
+      variants: (p.variants ?? []).map((v) => ({ _id: v._id, label: v.label, price: String(v.price) })),
       crops: p.crops ?? [],
       file: null,
       preview: p.imageUrl,
@@ -114,6 +135,23 @@ export function ProductsManager() {
       setError("Name is required");
       return;
     }
+    // Checked here so the row at fault is still on screen, rather than only
+    // when the server refuses it.
+    for (const v of form.variants) {
+      if (!v.label.trim()) {
+        setError('Every size needs a label, e.g. "1 L" or "5 kg".');
+        return;
+      }
+      if (v.price === "" || Number(v.price) < 0 || Number.isNaN(Number(v.price))) {
+        setError(`Give ${v.label.trim()} a price.`);
+        return;
+      }
+    }
+    const labels = form.variants.map((v) => v.label.trim().toLowerCase());
+    if (new Set(labels).size !== labels.length) {
+      setError("Two sizes have the same label.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -122,6 +160,12 @@ export function ProductsManager() {
       data.append("description", form.description.trim());
       data.append("price", form.price || "0");
       data.append("unit", form.unit.trim());
+      data.append(
+        "variants",
+        JSON.stringify(
+          form.variants.map((v) => ({ _id: v._id, label: v.label.trim(), price: Number(v.price) || 0 }))
+        )
+      );
       data.append("crops", JSON.stringify(form.crops));
       if (form.file) data.append("image", form.file);
 
@@ -198,10 +242,27 @@ export function ProductsManager() {
               <div className="flex flex-1 flex-col p-4">
                 <div className="font-semibold">{p.name}</div>
                 {p.description && <p className="mt-1 text-sm text-zinc-500">{p.description}</p>}
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="font-semibold text-green-600">₹{p.price}</span>
-                  {p.unit && <span className="text-xs text-zinc-500">{p.unit}</span>}
-                </div>
+                {/* Every size and its price, or the single price when there
+                    are none. The sizes are what the agronomist picks from in
+                    the field, so they are what the card should show. */}
+                {p.variants && p.variants.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {p.variants.map((v) => (
+                      <span
+                        key={v._id}
+                        className="inline-flex items-baseline gap-1 rounded-md border border-zinc-200 px-2 py-0.5 text-xs dark:border-zinc-700"
+                      >
+                        <span className="text-zinc-600 dark:text-zinc-300">{v.label}</span>
+                        <span className="font-semibold text-green-600">₹{v.price}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="font-semibold text-green-600">₹{p.price}</span>
+                    {p.unit && <span className="text-xs text-zinc-500">{p.unit}</span>}
+                  </div>
+                )}
                 <div className="mt-2 flex flex-wrap gap-1">
                   {p.crops && p.crops.length > 0 ? (
                     p.crops.map((c) => (
@@ -317,6 +378,66 @@ export function ProductsManager() {
                     className="w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700"
                   />
                 </label>
+              </div>
+
+              {/* Pack sizes. Once any exist they replace the single price
+                  above — the agronomist picks one of these in the field. */}
+              <div className="text-sm">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-zinc-500">
+                    Sizes{" "}
+                    <span className="text-zinc-400">— same product in different packs, each with its own price</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={addVariant}
+                    className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                  >
+                    <Plus size={13} /> Add size
+                  </button>
+                </div>
+                {form.variants.length === 0 ? (
+                  <p className="text-xs text-zinc-400">
+                    None — sold in one size at the price above. Add sizes like 500 ml, 1 L, 5 L.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {form.variants.map((v, i) => (
+                      <div key={v._id ?? `new-${i}`} className="flex items-center gap-2">
+                        <input
+                          placeholder="1 L"
+                          value={v.label}
+                          onChange={(e) => setVariant(i, { label: e.target.value })}
+                          className="w-full flex-1 rounded-lg border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700"
+                        />
+                        <div className="relative w-36">
+                          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400">
+                            ₹
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            placeholder="0"
+                            value={v.price}
+                            onChange={(e) => setVariant(i, { price: e.target.value })}
+                            className="w-full rounded-lg border border-zinc-300 bg-transparent py-2 pl-7 pr-3 dark:border-zinc-700"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeVariant(i)}
+                          title="Remove this size"
+                          className="rounded-lg p-2 text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-xs text-zinc-400">
+                      With sizes set, the single price above is not used.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="text-sm">
