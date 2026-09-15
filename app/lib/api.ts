@@ -386,6 +386,12 @@ export type ProductSaleItem = {
   unit: string;
   imageUrl: string;
   qty: number;
+  /**
+   * The catalog price per unit at the time of sale. Equal to `unitPrice` on an
+   * ordinary sale; lower `unitPrice` means a farmer/FPO rate was agreed on the
+   * field. Absent on sales recorded before this was kept.
+   */
+  listPrice?: number | null;
   unitPrice: number;
   /** The discount on this product as the agronomist entered it. */
   discount?: number;

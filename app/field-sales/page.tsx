@@ -576,6 +576,7 @@ export default function FieldSalesPage() {
                   <span className="flex-1">Product</span>
                   <span className="w-16 text-right">Qty</span>
                   <span className="w-24 text-right">Rate</span>
+                  <span className="w-28 text-right">Farmer/FPO rate</span>
                   <span className="w-28 text-right">Amount</span>
                   <span className="w-28 text-right">Discount</span>
                   <span className="w-28 text-right">Net</span>
@@ -609,7 +610,34 @@ export default function FieldSalesPage() {
                           </div>
                         </div>
                         <span className="w-16 text-right text-sm">{it.qty}</span>
-                        <span className="w-24 text-right text-sm">{money(it.unitPrice)}</span>
+                        {/* Rate is the catalogue; Farmer/FPO rate is what was
+                            actually charged, shown only when it differs — a dash
+                            says "no special rate", which is the ordinary case.
+                            Older sales kept no catalogue snapshot, so for them
+                            the rate charged stands in and the second column
+                            cannot say either way. */}
+                        {(() => {
+                          const overridden =
+                            it.listPrice != null && round2(it.unitPrice) !== round2(it.listPrice);
+                          return (
+                            <>
+                              {/* Struck through in red once a farmer/FPO rate
+                                  replaced it — the eye should land on the
+                                  price that was charged, not the one that
+                                  wasn't. */}
+                              <span
+                                className={`w-24 text-right text-sm ${
+                                  overridden ? "text-zinc-400 line-through decoration-red-500" : ""
+                                }`}
+                              >
+                                {money(it.listPrice ?? it.unitPrice)}
+                              </span>
+                              <span className="w-28 text-right text-sm font-medium text-green-600">
+                                {overridden ? money(it.unitPrice) : "—"}
+                              </span>
+                            </>
+                          );
+                        })()}
                         {/* Stated ex-tax, the way the app states it and the way
                             a GST bill reads — the tax is added once at the end,
                             so this will not equal qty x rate. */}
