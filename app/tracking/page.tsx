@@ -1,8 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Navigation, Clock, MapPin, X, CloudRain, PauseCircle, ChevronLeft, ChevronRight } from "lucide-react";
-import { api, Person, TrackingPause, TrackingSession } from "../lib/api";
+import {
+  Navigation,
+  Clock,
+  MapPin,
+  X,
+  CloudRain,
+  PauseCircle,
+  ChevronLeft,
+  ChevronRight,
+  Users,
+  Phone,
+} from "lucide-react";
+import { api, NearbyResult, Person, TrackingPause, TrackingSession } from "../lib/api";
 import { PhotoThumb } from "../components/lightbox";
 
 function fmtDateTime(s: string) {
@@ -42,61 +53,252 @@ function pausedMinutes(pauses: TrackingPause[] | undefined) {
  * Leaflet is loaded from a CDN inside the frame rather than bundled: the map is
  * one screen in the whole dashboard, and this keeps it out of the app bundle.
  */
-function RouteMap({ session }: { session: TrackingSession }) {
+/**
+ * The route drawn on satellite imagery, in a sandboxed iframe.
+ *
+ * Leaflet is loaded from a CDN inside the frame rather than bundled: the map is
+ * one screen in the whole dashboard, and this keeps it out of the app bundle.
+ *
+ * Two layers sit on it. The agent's own fixes are the day itself. The farmer
+ * pins are context - whose land the agent was standing among - and they are
+ * anchored to ONE point of the route rather than the whole of it, so "nearby"
+ * always means near a specific place rather than near a line.
+ */
+function RouteMap({
+  session,
+  nearby,
+}: {
+  session: TrackingSession;
+  nearby: NearbyResult | null;
+}) {
   const points = (session.points ?? []).filter((p) => p.latitude != null && p.longitude != null);
 
   const html = useMemo(() => {
     // `at` travels with each fix so a dot can say when it was recorded.
     const coords = points.map((p) => [p.latitude, p.longitude, p.at ?? null]);
+    const anchor = nearby?.anchor ?? null;
+    const farmers = nearby?.farmers ?? [];
+    const radiusKm = nearby?.radiusKm ?? 0;
     return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>html,body,#map{height:100%;margin:0;padding:0;background:#eee}</style></head>
+<style>html,body,#map{height:100%;margin:0;padding:0;background:#eee}
+.legend{background:rgba(255,255,255,.92);border-radius:8px;padding:6px 9px;font:12px system-ui,sans-serif;line-height:1.7;color:#27272a}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;border:1.5px solid #fff;vertical-align:-1px}
+.pop{font:13px system-ui,sans-serif;line-height:1.5}
+.pop b{font-size:14px}
+.pop a{color:#16a34a;text-decoration:none;font-weight:600}
+.endlabel{background:rgba(24,24,27,.85);border:0;color:#fff;font:600 11px system-ui,sans-serif;padding:1px 6px;border-radius:5px;box-shadow:none}
+.endlabel::before{border-top-color:rgba(24,24,27,.85)}
+.fitbtn{background:#fff;border-radius:6px;padding:5px 9px;font:600 12px system-ui,sans-serif;color:#166534;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+.fitbtn:hover{background:#f0fdf4}</style></head>
 <body><div id="map"></div><script>
   var C = ${JSON.stringify(coords)};
+  var ANCHOR = ${JSON.stringify(anchor)};
+  var FARMERS = ${JSON.stringify(farmers)};
+  var RADIUS_KM = ${JSON.stringify(radiusKm)};
   var map = L.map('map', { attributionControl: false });
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20 }).addTo(map);
+
+  /**
+   * A provisional view, set before any layer is added.
+   *
+   * Leaflet projects a vector layer against the map's current centre and zoom.
+   * With no view ever set there is nothing to project against, and a layer that
+   * needs its own pixel position - circle.getBounds() above all - throws,
+   * which silently kills every line after it and leaves a blank map wearing its
+   * zoom buttons. The closing fitBounds below is what actually frames the day.
+   */
+  map.setView(
+    ANCHOR ? [ANCHOR.latitude, ANCHOR.longitude] : C.length ? [C[0][0], C[0][1]] : [12.9716, 77.5946],
+    ANCHOR || C.length ? 15 : 11
+  );
 
   function timeAt(iso) {
     if (!iso) return '';
     var d = new Date(iso);
     return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
-
-  if (C.length) {
-    // Every recorded fix as its own dot, deliberately NOT joined into a line:
-    // a polyline draws a straight segment between consecutive fixes, which
-    // invents travel through whatever lies between them. The dots show only
-    // where the agent was actually recorded.
-    C.forEach(function (c, i) {
-      var first = i === 0;
-      var last = i === C.length - 1;
-      var fill = first ? '#2E9E5B' : last ? '#E5484D' : '#1E88E5';
-      L.circleMarker([c[0], c[1]], {
-        radius: first || last ? 7 : 4,
-        color: '#fff',
-        weight: first || last ? 3 : 1.5,
-        fillColor: fill,
-        fillOpacity: first || last ? 1 : 0.85,
-      })
-        .addTo(map)
-        .bindTooltip(
-          (first ? 'Start' : last ? 'End' : 'Point ' + (i + 1)) +
-            (timeAt(c[2]) ? ' · ' + timeAt(c[2]) : '')
-        );
+  // The names and villages below come from the database, so they are escaped
+  // before they are put into markup rather than trusted to be plain text.
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
+  }
 
-    if (C.length > 1) {
-      map.fitBounds(L.latLngBounds(C.map(function (c) { return [c[0], c[1]]; })), { padding: [30, 30] });
-    } else {
-      map.setView([C[0][0], C[0][1]], 16);
-    }
+  /**
+   * What the opening view has to contain.
+   *
+   * Deliberately the route and the farmer pins, and NOT the radius ring: the
+   * ring is 5 km across by default, and framing it shrinks a day spent inside
+   * one village to a single pixel with start, end and every farmer stacked on
+   * it. The ring is context you can pan out to, not the subject.
+   */
+  var bounds = [];
+  /** The route on its own, for the button that returns to it. */
+  var routeBounds = [];
+
+  /**
+   * The circle of ground the farmer list covers, drawn before the pins so the
+   * count on the banner is visibly a count of what is inside this ring - not a
+   * number that has to be taken on trust.
+   */
+  if (ANCHOR && RADIUS_KM) {
+    var ring = L.circle([ANCHOR.latitude, ANCHOR.longitude], {
+      radius: RADIUS_KM * 1000,
+      color: '#FACC15',
+      weight: 2,
+      opacity: 0.9,
+      fillColor: '#FACC15',
+      fillOpacity: 0.07,
+    }).addTo(map);
+    ring.bringToBack();
+  }
+
+  // Farmers go on first, so a dense village never buries the agent's own day.
+  FARMERS.forEach(function (f) {
+    var own = !!f.isOwn;
+    L.circleMarker([f.latitude, f.longitude], {
+      radius: 6,
+      color: '#fff',
+      weight: 2,
+      fillColor: own ? '#F59E0B' : '#A855F7',
+      fillOpacity: 0.95,
+    })
+      .addTo(map)
+      .bindTooltip(esc(f.name) + ' - ' + f.distanceKm + ' km')
+      .bindPopup(
+        '<div class="pop"><b>' + esc(f.name) + '</b><br/>' +
+          (f.mobile ? '<a href="tel:' + esc(f.mobile) + '">' + esc(f.mobile) + '</a><br/>' : '') +
+          esc([f.village, f.taluk].filter(Boolean).join(', ')) + '<br/>' +
+          '<span style="color:#71717a">' + f.distanceKm + ' km away' +
+          (f.fromGeofence ? ' - farm centre' : '') + '</span><br/>' +
+          '<span style="color:#71717a">Agronomist: ' + esc(f.agronomist || 'unassigned') + '</span></div>'
+      );
+    bounds.push([f.latitude, f.longitude]);
+  });
+
+  // Every recorded fix as its own dot, deliberately NOT joined into a line:
+  // a polyline draws a straight segment between consecutive fixes, which
+  // invents travel through whatever lies between them. The dots show only
+  // where the agent was actually recorded.
+  function dot(c, opts) {
+    return L.circleMarker([c[0], c[1]], {
+      radius: opts.radius,
+      color: '#fff',
+      weight: opts.weight,
+      fillColor: opts.fill,
+      fillOpacity: opts.opacity,
+    })
+      .addTo(map)
+      .bindTooltip(
+        // The hint belongs on a tooltip you summoned. On a label that is always
+        // on screen it is just noise repeated at both ends of every route.
+        opts.label +
+          (timeAt(c[2]) ? ' - ' + timeAt(c[2]) : '') +
+          (opts.permanent ? '' : ' - click to search here'),
+        opts.permanent ? { permanent: true, direction: 'top', className: 'endlabel' } : {}
+      )
+      // Re-anchors the farmer search. The parent refetches: asking from in
+      // here would mean the frame needed the API base and the admin token.
+      .on('click', function () {
+        parent.postMessage({ type: 'oneroot:anchor', lat: c[0], lng: c[1] }, '*');
+      });
+  }
+
+  C.forEach(function (c) {
+    bounds.push([c[0], c[1]]);
+    routeBounds.push([c[0], c[1]]);
+  });
+
+  // The middle of the day first, so neither end can be buried under it.
+  C.slice(1, -1).forEach(function (c, i) {
+    dot(c, { radius: 4, weight: 1.5, fill: '#1E88E5', opacity: 0.85, label: 'Point ' + (i + 2) });
+  });
+
+  /**
+   * End, then Start on top and smaller.
+   *
+   * A day that finishes in the yard it began in puts these two on the same
+   * pixel, and whichever is drawn second hides the other completely - which is
+   * exactly the case where "where did he set off from?" is worth asking. Drawn
+   * this way they read as a green centre inside a red ring, and both labels
+   * stay on the map rather than waiting for a hover that cannot separate them.
+   */
+  if (C.length > 1) {
+    dot(C[C.length - 1], {
+      radius: 9, weight: 3, fill: '#E5484D', opacity: 1, label: 'End', permanent: true,
+    });
+  }
+  if (C.length) {
+    dot(C[0], {
+      radius: 5, weight: 2.5, fill: '#2E9E5B', opacity: 1, label: 'Start', permanent: true,
+    });
+  }
+
+  /** A ring round the point the farmer search is centred on. */
+  if (ANCHOR) {
+    L.circleMarker([ANCHOR.latitude, ANCHOR.longitude], {
+      radius: 11,
+      color: '#FACC15',
+      weight: 3,
+      fill: false,
+    })
+      .addTo(map)
+      .bindTooltip('Searching around here');
+  }
+
+  if (bounds.length > 1) {
+    map.fitBounds(L.latLngBounds(bounds), { padding: [30, 30] });
+  } else if (bounds.length === 1) {
+    map.setView(bounds[0], 16);
   } else {
     map.setView([12.9716, 77.5946], 11);
   }
+
+  /**
+   * Back to the day itself.
+   *
+   * With farmers up to 25 km out the opening view can be wide, and the route is
+   * then a speck in the middle of it. One click returns to it without hunting.
+   */
+  if (routeBounds.length) {
+    var fit = L.control({ position: 'topright' });
+    fit.onAdd = function () {
+      var b = L.DomUtil.create('div', 'fitbtn');
+      b.innerHTML = 'Zoom to route';
+      L.DomEvent.on(b, 'click', function (e) {
+        L.DomEvent.stop(e);
+        if (routeBounds.length > 1) {
+          map.fitBounds(L.latLngBounds(routeBounds), { padding: [50, 50] });
+        } else {
+          map.setView(routeBounds[0], 18);
+        }
+      });
+      L.DomEvent.disableClickPropagation(b);
+      return b;
+    };
+    fit.addTo(map);
+  }
+
+  var legend = L.control({ position: 'bottomright' });
+  legend.onAdd = function () {
+    var d = L.DomUtil.create('div', 'legend');
+    d.innerHTML =
+      '<i style="background:#2E9E5B"></i>Start<br/>' +
+      '<i style="background:#1E88E5"></i>Route point<br/>' +
+      '<i style="background:#E5484D"></i>End' +
+      (FARMERS.length
+        ? '<br/><i style="background:#F59E0B"></i>Their farmer' +
+          '<br/><i style="background:#A855F7"></i>Other farmer'
+        : '');
+    return d;
+  };
+  legend.addTo(map);
 </script></body></html>`;
-  }, [points]);
+  }, [points, nearby]);
 
   if (points.length === 0) {
     return (
@@ -106,7 +308,13 @@ function RouteMap({ session }: { session: TrackingSession }) {
     );
   }
 
-  return <iframe srcDoc={html} className="h-full w-full border-0" sandbox="allow-scripts" />;
+  return (
+    <iframe
+      srcDoc={html}
+      className="h-full w-full border-0"
+      sandbox="allow-scripts allow-popups"
+    />
+  );
 }
 
 const PAGE_SIZE = 20;
@@ -127,6 +335,19 @@ export default function TrackingPage() {
   // deliberately omits points.
   const [open, setOpen] = useState<TrackingSession | null>(null);
   const [openLoading, setOpenLoading] = useState(false);
+
+  /**
+   * Where the open session's agent was, named, and whose farms are around it.
+   *
+   * Kept apart from the session itself because it is answered by a different
+   * question: the route is a fact about the day, this is a lookup about one
+   * point of it, and it is re-asked whenever that point or the radius changes.
+   */
+  const [nearby, setNearby] = useState<NearbyResult | null>(null);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [radiusKm, setRadiusKm] = useState(5);
+  /** null = the session's last fix, which is what the server defaults to. */
+  const [anchor, setAnchor] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -150,6 +371,64 @@ export default function TrackingPage() {
       .finally(() => setLoading(false));
   }, [who, from, page]);
 
+  /**
+   * The named place and the farmers around it, refetched whenever the question
+   * changes - a different session, a different dot, a wider radius.
+   *
+   * `cancelled` guards the late reply: widening the radius twice quickly would
+   * otherwise let the first, narrower answer land last and overwrite the one
+   * actually asked for.
+   */
+  useEffect(() => {
+    if (!open) {
+      setNearby(null);
+      return;
+    }
+    let cancelled = false;
+    setNearbyLoading(true);
+    api
+      .getTrackingNearby(open._id, {
+        lat: anchor?.lat,
+        lng: anchor?.lng,
+        radiusKm,
+      })
+      .then((r) => {
+        if (!cancelled) setNearby(r);
+      })
+      .catch(() => {
+        // Context, not the screen. The route still draws without it.
+        if (!cancelled) setNearby(null);
+      })
+      .finally(() => {
+        if (!cancelled) setNearbyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, anchor, radiusKm]);
+
+  /**
+   * Clicking a route dot inside the map re-centres the farmer search on it.
+   *
+   * The map is a sandboxed iframe with no API base and no admin token, so it
+   * asks the parent to do the fetching rather than doing it itself.
+   */
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const d = e.data;
+      if (!d || d.type !== "oneroot:anchor") return;
+      if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
+      setAnchor({ lat: d.lat, lng: d.lng });
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  /** Village and taluk read as one label; either may legitimately be missing. */
+  const place = [nearby?.address?.village, nearby?.address?.taluk, nearby?.address?.district]
+    .filter(Boolean)
+    .join(", ");
+
   /** Changing agent or date must land on page one of the new results. */
   const applyFilter = (set: (v: string) => void) => (value: string) => {
     set(value);
@@ -158,6 +437,9 @@ export default function TrackingPage() {
 
   const showRoute = async (id: string) => {
     setOpenLoading(true);
+    // A pinned dot belongs to the session it was clicked on, not to the next one.
+    setAnchor(null);
+    setNearby(null);
     try {
       setOpen(await api.getTrackingSession(id));
     } catch (e) {
@@ -427,7 +709,7 @@ export default function TrackingPage() {
       {/* Route map */}
       {(open || openLoading) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="flex h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white dark:bg-zinc-950">
+          <div className="flex h-[85vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white dark:bg-zinc-950">
             <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
               <div>
                 <div className="font-medium">{open?.user?.name || open?.userName || "Route"}</div>
@@ -447,18 +729,135 @@ export default function TrackingPage() {
                 )}
               </div>
               <button
-                onClick={() => setOpen(null)}
+                onClick={() => {
+                  setOpen(null);
+                  setAnchor(null);
+                  setNearby(null);
+                }}
                 className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
               >
                 <X size={18} />
               </button>
             </div>
-            <div className="flex-1">
-              {openLoading ? (
-                <div className="flex h-full items-center justify-center text-sm text-zinc-500">Loading route…</div>
-              ) : open ? (
-                <RouteMap session={open} />
-              ) : null}
+            {/* Where the agent was, and who farms around there. */}
+            {open && (
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+                <div className="flex min-w-0 items-center gap-2">
+                  <MapPin size={15} className="shrink-0 text-amber-500" />
+                  {nearbyLoading && !nearby ? (
+                    <span className="text-zinc-500">Locating…</span>
+                  ) : place ? (
+                    <span className="truncate">
+                      <span className="font-medium">{place}</span>
+                      {nearby?.address?.state ? (
+                        <span className="text-zinc-500"> · {nearby.address.state}</span>
+                      ) : null}
+                      {/* Which fix this describes. "Last seen" and "a dot you
+                          picked" are different claims and must not look alike. */}
+                      <span className="text-xs text-zinc-500">
+                        {" "}
+                        · {anchor ? "picked point" : "last seen"}
+                        {!anchor && nearby?.anchor?.at ? ` ${fmtTime(nearby.anchor.at)}` : ""}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-zinc-500">
+                      Village not known for this spot
+                      {/* The geocoder names populated places; a fix in open
+                          country legitimately has no name to give. */}
+                    </span>
+                  )}
+                  {anchor && (
+                    <button
+                      onClick={() => setAnchor(null)}
+                      className="shrink-0 text-xs text-green-600 hover:underline"
+                    >
+                      reset
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-zinc-500">
+                    <Users size={14} />
+                    {nearbyLoading ? "…" : `${nearby?.farmers.length ?? 0} farmers`} within
+                  </span>
+                  <select
+                    value={radiusKm}
+                    onChange={(e) => setRadiusKm(Number(e.target.value))}
+                    className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                  >
+                    {[1, 2, 5, 10, 25].map((r) => (
+                      <option key={r} value={r}>
+                        {r} km
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+            <div className="flex min-h-0 flex-1">
+              <div className="min-w-0 flex-1">
+                {openLoading ? (
+                  <div className="flex h-full items-center justify-center text-sm text-zinc-500">Loading route…</div>
+                ) : open ? (
+                  <RouteMap session={open} nearby={nearby} />
+                ) : null}
+              </div>
+
+              {/*
+                The same farmers as the pins, as a list you can read and call
+                from. A pin answers "where"; this answers "who", and on a
+                cluster of overlapping farms the map cannot answer that at all.
+              */}
+              {open && (
+                <aside className="hidden w-72 shrink-0 flex-col border-l border-zinc-200 md:flex dark:border-zinc-800">
+                  <div className="border-b border-zinc-200 px-3 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+                    Farmers nearby
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    {nearbyLoading ? (
+                      <p className="p-3 text-sm text-zinc-500">Searching…</p>
+                    ) : !nearby || nearby.farmers.length === 0 ? (
+                      <p className="p-3 text-sm text-zinc-500">
+                        No farmers on record within {radiusKm} km of this spot.
+                      </p>
+                    ) : (
+                      nearby.farmers.map((f) => (
+                        <div
+                          key={f._id}
+                          className="border-b border-zinc-100 px-3 py-2 last:border-0 dark:border-zinc-900"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span
+                              className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                                f.isOwn ? "bg-amber-500" : "bg-purple-500"
+                              }`}
+                              title={f.isOwn ? "Their farmer" : "Another agronomist's farmer"}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium">{f.name}</div>
+                              <div className="truncate text-xs text-zinc-500">
+                                {[f.village, f.taluk].filter(Boolean).join(", ") || "No address"}
+                              </div>
+                              {f.mobile ? (
+                                <a
+                                  href={`tel:${f.mobile}`}
+                                  className="mt-0.5 inline-flex items-center gap-1 text-xs text-green-600 hover:underline"
+                                >
+                                  <Phone size={11} /> {f.mobile}
+                                </a>
+                              ) : null}
+                            </div>
+                            <span className="shrink-0 whitespace-nowrap text-xs font-medium text-zinc-500">
+                              {f.distanceKm} km
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </aside>
+              )}
             </div>
           </div>
         </div>

@@ -656,6 +656,37 @@ export type TrackingSession = {
   createdAt: string;
 };
 
+
+/**
+ * A farmer found near a point on an agent's route.
+ *
+ * `fromGeofence` means the pin is the centre of their drawn boundary rather
+ * than a point they stood on — the middle of a field, not a doorstep.
+ */
+export type NearbyFarmer = {
+  _id: string;
+  name: string;
+  mobile: string;
+  latitude: number;
+  longitude: number;
+  distanceKm: number;
+  fromGeofence: boolean;
+  village: string;
+  taluk: string;
+  district: string;
+  agronomist: string;
+  /** Assigned to the agent whose day this is. */
+  isOwn: boolean;
+};
+
+/** Where an agent was, named, plus whose farms surround that spot. */
+export type NearbyResult = {
+  anchor: { latitude: number; longitude: number; at: string | null } | null;
+  address: { village: string; taluk: string; district: string; state: string } | null;
+  radiusKm: number;
+  farmers: NearbyFarmer[];
+};
+
 /** A day's work, measured from what was recorded rather than typed. */
 export type DayStats = {
   distanceKm: number;
@@ -1090,6 +1121,24 @@ export const api = {
 
   /** One session WITH its route, for the map. */
   getTrackingSession: (id: string) => json<TrackingSession>(`/api/tracking/${id}`),
+
+  /**
+   * The place a route point sits in, and the farmers around it.
+   *
+   * Defaults to the session's last fix; pass `lat`/`lng` to ask about a
+   * different dot on the map.
+   */
+  getTrackingNearby: (
+    id: string,
+    params?: { lat?: number; lng?: number; radiusKm?: number }
+  ) => {
+    const q = new URLSearchParams();
+    if (params?.lat != null) q.set("lat", String(params.lat));
+    if (params?.lng != null) q.set("lng", String(params.lng));
+    if (params?.radiusKm != null) q.set("radiusKm", String(params.radiusKm));
+    const qs = q.toString();
+    return json<NearbyResult>(`/api/tracking/${id}/nearby${qs ? `?${qs}` : ""}`);
+  },
 
   /** A single agent's measured numbers for one day. `date` is yyyy-mm-dd. */
   getDayStats: (userId: string, date?: string) => {
