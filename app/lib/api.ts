@@ -10,6 +10,21 @@ export type FarmAddress = {
   geocodedAt?: string | null;
 };
 
+/**
+ * A place found by name in the same geocoder that names a farm when its
+ * boundary is drawn, so a picked result is spelled the way a boundary would be.
+ */
+export type PlaceHit = {
+  /** The full name, so the right one is recognisable by its surroundings. */
+  label: string;
+  latitude: number;
+  longitude: number;
+  village: string;
+  taluk: string;
+  district: string;
+  state: string;
+};
+
 export type Person = {
   _id: string;
   name: string;
@@ -671,6 +686,11 @@ export type NearbyFarmer = {
   longitude: number;
   distanceKm: number;
   fromGeofence: boolean;
+  /**
+   * Nothing but the village is known yet - added from the dashboard, not yet
+   * visited - so the pin is the village centre, not the farm.
+   */
+  approx?: boolean;
   village: string;
   taluk: string;
   district: string;
@@ -783,14 +803,37 @@ export const api = {
    * the chosen taluk to get only its villages, so the dropdowns cannot offer a
    * combination that matches nothing.
    */
-  farmerPlaces: (params: { district?: string; taluk?: string } = {}) => {
+  farmerPlaces: (params: { state?: string; district?: string; taluk?: string } = {}) => {
     const q = new URLSearchParams();
+    if (params.state) q.set("state", params.state);
     if (params.district) q.set("district", params.district);
     if (params.taluk) q.set("taluk", params.taluk);
-    return json<{ districts: string[]; taluks: string[]; villages: string[] }>(
+    return json<{ states?: string[]; districts: string[]; taluks: string[]; villages: string[] }>(
       `/api/users/farmers/places?${q.toString()}`
     );
   },
+
+  /**
+   * EVERY district, taluk and village in a state - not only where farmers are.
+   * For registering a farmer somewhere nobody has been yet. Spelled the way the
+   * geocoder spells a drawn boundary, so a pick here never starts a duplicate.
+   */
+  places: (params: { state?: string; district?: string; taluk?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.state) q.set("state", params.state);
+    if (params.district) q.set("district", params.district);
+    if (params.taluk) q.set("taluk", params.taluk);
+    return json<{ states: string[]; districts: string[]; taluks: string[]; villages: string[] }>(
+      `/api/places?${q.toString()}`
+    );
+  },
+
+  /**
+   * Find a village by name, for one no farmer is registered in yet. Empty list
+   * on any failure - the geocoder is a third party and a slow one.
+   */
+  searchPlaces: (query: string) =>
+    json<{ places: PlaceHit[] }>(`/api/fpos/area/search?q=${encodeURIComponent(query)}`),
 
   /** Agronomists a page at a time. The farmer counts cover the given window. */
   listAgronomistsPage: (params: {
@@ -823,6 +866,11 @@ export const api = {
     dop?: string | null;
     /** yyyy-mm-dd — the day the assigned agronomist should visit. */
     visitDate?: string | null;
+    /**
+     * Where the farm is. The server files each part under the spelling already
+     * in use, and the geocoder replaces it once a boundary is drawn.
+     */
+    farmAddress?: { state?: string; district?: string; taluk?: string; village?: string };
   }) => json<Person>("/api/users/farmers", { method: "POST", body: JSON.stringify(body) }),
   /**
    * Edit a farmer. Every field is optional and only what is sent is touched, so

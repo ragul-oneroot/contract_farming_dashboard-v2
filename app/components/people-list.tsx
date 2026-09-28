@@ -9,6 +9,7 @@ import { api, CatalogCrop, missingDetails, Person, Region } from "../lib/api";
 import { AcresCovered } from "./acres-covered";
 import { RegionsDialog } from "./regions-dialog";
 import { AudioPlayer } from "./audio-player";
+import { EMPTY_LOCATION, FarmLocation, FarmLocationPicker } from "./farm-location-picker";
 
 const PAGE_SIZE = 20;
 
@@ -156,6 +157,8 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
     farmingType: "contract",
     dop: "",
   });
+  /** Where the farm is - State > District > Taluk > Village, picked not typed. */
+  const [location, setLocation] = useState<FarmLocation>(EMPTY_LOCATION);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -273,6 +276,7 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
       farmingType: "contract",
       dop: "",
     });
+    setLocation(EMPTY_LOCATION);
     setFormError(null);
     setAdding(true);
   };
@@ -296,6 +300,11 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
         variety: form.variety || undefined,
         farmingType: form.farmingType,
         dop: form.dop || null,
+        // Only once something below state is chosen: a state on its own - and
+        // it is filled in for you when there is only one - says nothing about
+        // where the farm is.
+        farmAddress:
+          location.district || location.taluk || location.village ? location : undefined,
       });
       setAdding(false);
       await load();
@@ -961,6 +970,16 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
               ) : (
                 <div className="hidden sm:block" />
               )}
+            </div>
+
+            <div className="mt-5 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+              <p className="text-sm font-medium">Farm location (optional)</p>
+              <p className="mb-3 text-xs text-zinc-500">
+                Every district, taluk and village in the state, spelled the way the app names a farm
+                from its boundary. When the boundary is drawn, its village, taluk and district
+                replace this.
+              </p>
+              <FarmLocationPicker value={location} onChange={setLocation} />
             </div>
 
             <div className="mt-5 border-t border-zinc-100 pt-4 dark:border-zinc-800">
