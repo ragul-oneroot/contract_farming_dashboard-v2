@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Navigation,
   Clock,
@@ -73,12 +73,34 @@ function RouteMap({
 }) {
   const points = (session.points ?? []).filter((p) => p.latitude != null && p.longitude != null);
 
+  /**
+   * Which legend groups are unticked.
+   *
+   * The map is rebuilt whenever the radius or the anchor changes, and a fresh
+   * map would come back with everything ticked - undoing a choice the person
+   * made seconds ago. A ref rather than state, because a tick must not itself
+   * rebuild the map: that would throw away the zoom and pan it was made at.
+   * It lives here, so closing the map and opening another starts fresh.
+   */
+  const hiddenRef = useRef<string[]>([]);
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const d = e.data;
+      if (d && d.type === "oneroot:legend" && Array.isArray(d.hidden)) {
+        hiddenRef.current = d.hidden.filter((k: unknown) => typeof k === "string");
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
   const html = useMemo(() => {
     // `at` travels with each fix so a dot can say when it was recorded.
     const coords = points.map((p) => [p.latitude, p.longitude, p.at ?? null]);
     const anchor = nearby?.anchor ?? null;
     const farmers = nearby?.farmers ?? [];
     const radiusKm = nearby?.radiusKm ?? 0;
+    const hidden = hiddenRef.current;
     return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -86,20 +108,48 @@ function RouteMap({
 <style>html,body,#map{height:100%;margin:0;padding:0;background:#eee}
 .legend{background:rgba(255,255,255,.92);border-radius:8px;padding:6px 9px;font:12px system-ui,sans-serif;line-height:1.7;color:#27272a}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;border:1.5px solid #fff;vertical-align:-1px}
+.legrow{display:flex;align-items:center;gap:0;cursor:pointer;user-select:none;white-space:nowrap}
+.legrow input{margin:0 7px 0 0;accent-color:#16a34a;cursor:pointer}
+.legrow:hover{color:#000}
+.legempty{opacity:.45}
 .pop{font:13px system-ui,sans-serif;line-height:1.5}
 .pop b{font-size:14px}
 .pop a{color:#16a34a;text-decoration:none;font-weight:600}
 .endlabel{background:rgba(24,24,27,.85);border:0;color:#fff;font:600 11px system-ui,sans-serif;padding:1px 6px;border-radius:5px;box-shadow:none}
 .endlabel::before{border-top-color:rgba(24,24,27,.85)}
 .fitbtn{background:#fff;border-radius:6px;padding:5px 9px;font:600 12px system-ui,sans-serif;color:#166534;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)}
-.fitbtn:hover{background:#f0fdf4}</style></head>
+.fitbtn:hover{background:#f0fdf4}
+.leaflet-top.leaflet-right .fitbtn{margin-top:8px}</style></head>
 <body><div id="map"></div><script>
   var C = ${JSON.stringify(coords)};
   var ANCHOR = ${JSON.stringify(anchor)};
   var FARMERS = ${JSON.stringify(farmers)};
   var RADIUS_KM = ${JSON.stringify(radiusKm)};
-  var map = L.map('map', { attributionControl: false });
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20 }).addTo(map);
+  var HIDDEN = ${JSON.stringify(hidden)};
+  var map = L.map('map', { attributionControl: false, maxZoom: 20 });
+
+  /**
+   * Satellite imagery, with village names and roads laid over it.
+   *
+   * Imagery alone shows fields but not where they are: a cluster of route
+   * dots over brown squares could be any village in the district. Esri's
+   * reference layers are transparent tiles carrying names and roads, from the
+   * same keyless service as the imagery, and at field zoom they name the
+   * actual villages (Bhogapura, Gogapura, Sappaiahnapura) rather than only
+   * the towns.
+   *
+   * maxNativeZoom 18: past zoom 18 Esri has no imagery for rural Karnataka and
+   * serves a grey "Map data not yet available" tile instead. Capping the
+   * native zoom makes Leaflet enlarge the zoom-18 tiles when you zoom further,
+   * so a tight route shows a slightly soft photo rather than a grey square.
+   */
+  var ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+  var tileOpts = { maxZoom: 20, maxNativeZoom: 18 };
+  L.tileLayer(ESRI + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', tileOpts).addTo(map);
+  var names = L.layerGroup([
+    L.tileLayer(ESRI + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', tileOpts),
+    L.tileLayer(ESRI + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', tileOpts),
+  ]).addTo(map);
 
   /**
    * A provisional view, set before any layer is added.
@@ -129,12 +179,14 @@ function RouteMap({
   }
 
   /**
-   * What the opening view has to contain.
+   * What the opening view has to contain: the route, the farmer pins, and the
+   * whole search circle.
    *
-   * Deliberately the route and the farmer pins, and NOT the radius ring: the
-   * ring is 5 km across by default, and framing it shrinks a day spent inside
-   * one village to a single pixel with start, end and every farmer stacked on
-   * it. The ring is context you can pan out to, not the subject.
+   * The circle was once left out, to stop a short day being squeezed to a
+   * pixel - but then on a route inside one village the circle was entirely off
+   * screen and looked missing. Start and End now carry labels that are always
+   * shown, and Start is drawn on top, so they stay findable zoomed out; "Zoom
+   * to route" goes in close.
    */
   var bounds = [];
   /** The route on its own, for the button that returns to it. */
@@ -155,26 +207,55 @@ function RouteMap({
       fillOpacity: 0.07,
     }).addTo(map);
     ring.bringToBack();
+    // From the coordinates rather than the drawn shape, so it cannot depend on
+    // the map having been laid out yet.
+    var rb = L.latLng(ANCHOR.latitude, ANCHOR.longitude).toBounds(RADIUS_KM * 2000);
+    bounds.push([rb.getSouth(), rb.getWest()], [rb.getNorth(), rb.getEast()]);
   }
+
+  /**
+   * One group per legend row, so a checkbox can show or hide a whole kind of
+   * marker at once. DRAW_ORDER is bottom to top, and is re-applied after every
+   * toggle: a group put back on the map lands on top of everything, which
+   * would bury Start and End under a hundred route dots.
+   */
+  var GROUPS = {
+    approx: L.layerGroup(),
+    own: L.layerGroup(),
+    other: L.layerGroup(),
+    route: L.layerGroup(),
+    end: L.layerGroup(),
+    start: L.layerGroup(),
+  };
+  var DRAW_ORDER = ['approx', 'own', 'other', 'route', 'end', 'start'];
+  DRAW_ORDER.forEach(function (k) { GROUPS[k].addTo(map); });
 
   // Farmers go on first, so a dense village never buries the agent's own day.
   FARMERS.forEach(function (f) {
     var own = !!f.isOwn;
+    // A farmer placed at their village centre gets a colour of their own -
+    // pink, used for nothing else - and a dashed ring, so it cannot be read as
+    // a pin on the farm itself, whoever's farmer they are.
+    var approx = !!f.approx;
     L.circleMarker([f.latitude, f.longitude], {
-      radius: 6,
-      color: '#fff',
-      weight: 2,
-      fillColor: own ? '#F59E0B' : '#A855F7',
-      fillOpacity: 0.95,
+      radius: approx ? 8 : 6,
+      color: approx ? '#EC4899' : '#fff',
+      weight: approx ? 2.5 : 2,
+      dashArray: approx ? '3 3' : null,
+      fillColor: approx ? '#EC4899' : own ? '#F59E0B' : '#A855F7',
+      fillOpacity: approx ? 0.45 : 0.95,
     })
-      .addTo(map)
-      .bindTooltip(esc(f.name) + ' - ' + f.distanceKm + ' km')
+      .addTo(approx ? GROUPS.approx : own ? GROUPS.own : GROUPS.other)
+      .bindTooltip(esc(f.name) + ' - ' + (approx ? '~' : '') + f.distanceKm + ' km' + (approx ? ' (village centre)' : ''))
       .bindPopup(
         '<div class="pop"><b>' + esc(f.name) + '</b><br/>' +
           (f.mobile ? '<a href="tel:' + esc(f.mobile) + '">' + esc(f.mobile) + '</a><br/>' : '') +
           esc([f.village, f.taluk].filter(Boolean).join(', ')) + '<br/>' +
-          '<span style="color:#71717a">' + f.distanceKm + ' km away' +
+          '<span style="color:#71717a">' + (approx ? 'about ' : '') + f.distanceKm + ' km away' +
           (f.fromGeofence ? ' - farm centre' : '') + '</span><br/>' +
+          (approx
+            ? '<span style="color:#b45309">Placed at the village centre - no farm location yet.</span><br/>'
+            : '') +
           '<span style="color:#71717a">Agronomist: ' + esc(f.agronomist || 'unassigned') + '</span></div>'
       );
     bounds.push([f.latitude, f.longitude]);
@@ -192,7 +273,7 @@ function RouteMap({
       fillColor: opts.fill,
       fillOpacity: opts.opacity,
     })
-      .addTo(map)
+      .addTo(GROUPS[opts.group])
       .bindTooltip(
         // The hint belongs on a tooltip you summoned. On a label that is always
         // on screen it is just noise repeated at both ends of every route.
@@ -215,7 +296,7 @@ function RouteMap({
 
   // The middle of the day first, so neither end can be buried under it.
   C.slice(1, -1).forEach(function (c, i) {
-    dot(c, { radius: 4, weight: 1.5, fill: '#1E88E5', opacity: 0.85, label: 'Point ' + (i + 2) });
+    dot(c, { group: 'route', radius: 4, weight: 1.5, fill: '#1E88E5', opacity: 0.85, label: 'Point ' + (i + 2) });
   });
 
   /**
@@ -229,12 +310,12 @@ function RouteMap({
    */
   if (C.length > 1) {
     dot(C[C.length - 1], {
-      radius: 9, weight: 3, fill: '#E5484D', opacity: 1, label: 'End', permanent: true,
+      group: 'end', radius: 9, weight: 3, fill: '#E5484D', opacity: 1, label: 'End', permanent: true,
     });
   }
   if (C.length) {
     dot(C[0], {
-      radius: 5, weight: 2.5, fill: '#2E9E5B', opacity: 1, label: 'Start', permanent: true,
+      group: 'start', radius: 5, weight: 2.5, fill: '#2E9E5B', opacity: 1, label: 'Start', permanent: true,
     });
   }
 
@@ -283,20 +364,93 @@ function RouteMap({
     fit.addTo(map);
   }
 
+  /**
+   * Names on or off.
+   *
+   * On by default, since naming the place is the point. Off is for reading
+   * the ground itself - a label can sit right on top of the field in question.
+   */
+  var namesCtl = L.control({ position: 'topright' });
+  namesCtl.onAdd = function () {
+    var b = L.DomUtil.create('div', 'fitbtn');
+    b.innerHTML = 'Hide names';
+    L.DomEvent.on(b, 'click', function (e) {
+      L.DomEvent.stop(e);
+      if (map.hasLayer(names)) {
+        map.removeLayer(names);
+        b.innerHTML = 'Show names';
+      } else {
+        names.addTo(map);
+        b.innerHTML = 'Hide names';
+      }
+    });
+    L.DomEvent.disableClickPropagation(b);
+    return b;
+  };
+  namesCtl.addTo(map);
+
+  /** Put the groups back in stacking order, bottom to top. */
+  function restack() {
+    DRAW_ORDER.forEach(function (k) {
+      if (map.hasLayer(GROUPS[k])) {
+        GROUPS[k].eachLayer(function (l) { l.bringToFront(); });
+      }
+    });
+  }
+
+  function setShown(key, on) {
+    if (on) GROUPS[key].addTo(map);
+    else map.removeLayer(GROUPS[key]);
+    restack();
+  }
+
+  /**
+   * The legend doubles as the filter: tick a row to show that kind of marker,
+   * untick to hide it. Everything starts ticked.
+   *
+   * All five rows always show, so the legend reads the same on every map. A
+   * row whose group is empty on this day is greyed, so a tick that changes
+   * nothing does not look broken.
+   */
+  var ROWS = [
+    { key: 'start', color: '#2E9E5B', label: 'Start' },
+    { key: 'route', color: '#1E88E5', label: 'Route point' },
+    { key: 'end', color: '#E5484D', label: 'End' },
+    { key: 'own', color: '#F59E0B', label: 'Their farmer' },
+    { key: 'other', color: '#A855F7', label: 'Other farmer' },
+    { key: 'approx', color: '#EC4899', label: 'Village centre only' },
+  ];
+
   var legend = L.control({ position: 'bottomright' });
   legend.onAdd = function () {
     var d = L.DomUtil.create('div', 'legend');
-    d.innerHTML =
-      '<i style="background:#2E9E5B"></i>Start<br/>' +
-      '<i style="background:#1E88E5"></i>Route point<br/>' +
-      '<i style="background:#E5484D"></i>End' +
-      (FARMERS.length
-        ? '<br/><i style="background:#F59E0B"></i>Their farmer' +
-          '<br/><i style="background:#A855F7"></i>Other farmer'
-        : '');
+    ROWS.forEach(function (r) {
+      var n = GROUPS[r.key].getLayers().length;
+      var row = L.DomUtil.create('label', 'legrow' + (n ? '' : ' legempty'), d);
+      var box = L.DomUtil.create('input', '', row);
+      box.type = 'checkbox';
+      box.checked = HIDDEN.indexOf(r.key) === -1;
+      var sw = L.DomUtil.create('i', '', row);
+      sw.style.background = r.color;
+      row.appendChild(document.createTextNode(r.label + (r.key === 'own' || r.key === 'other' || r.key === 'approx' ? ' (' + n + ')' : '')));
+      L.DomEvent.on(box, 'change', function () {
+        setShown(r.key, box.checked);
+        // Tell the page, so the next rebuild of this map keeps the choice.
+        var off = ROWS.filter(function (x) { return !map.hasLayer(GROUPS[x.key]); })
+          .map(function (x) { return x.key; });
+        parent.postMessage({ type: 'oneroot:legend', hidden: off }, '*');
+      });
+    });
+    // Clicks and scrolls on the legend belong to the legend, not the map.
+    L.DomEvent.disableClickPropagation(d);
+    L.DomEvent.disableScrollPropagation(d);
     return d;
   };
   legend.addTo(map);
+
+  // Apply whatever was unticked before this rebuild.
+  HIDDEN.forEach(function (k) { if (GROUPS[k]) map.removeLayer(GROUPS[k]); });
+  restack();
 </script></body></html>`;
   }, [points, nearby]);
 
@@ -830,15 +984,26 @@ export default function TrackingPage() {
                           <div className="flex items-start justify-between gap-2">
                             <span
                               className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                                f.isOwn ? "bg-amber-500" : "bg-purple-500"
+                                f.approx ? "bg-pink-500" : f.isOwn ? "bg-amber-500" : "bg-purple-500"
                               }`}
-                              title={f.isOwn ? "Their farmer" : "Another agronomist's farmer"}
+                              title={
+                                f.approx
+                                  ? "Placed at the village centre - no farm location yet"
+                                  : f.isOwn
+                                    ? "Their farmer"
+                                    : "Another agronomist's farmer"
+                              }
                             />
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-sm font-medium">{f.name}</div>
                               <div className="truncate text-xs text-zinc-500">
                                 {[f.village, f.taluk].filter(Boolean).join(", ") || "No address"}
                               </div>
+                              {f.approx ? (
+                                <div className="text-[11px] text-pink-600 dark:text-pink-400">
+                                  Village centre - no farm location yet
+                                </div>
+                              ) : null}
                               {f.mobile ? (
                                 <a
                                   href={`tel:${f.mobile}`}
@@ -849,6 +1014,7 @@ export default function TrackingPage() {
                               ) : null}
                             </div>
                             <span className="shrink-0 whitespace-nowrap text-xs font-medium text-zinc-500">
+                              {f.approx ? "~" : ""}
                               {f.distanceKm} km
                             </span>
                           </div>
