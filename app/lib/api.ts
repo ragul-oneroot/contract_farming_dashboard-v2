@@ -719,6 +719,63 @@ export type DayStats = {
   salesTotal: number;
 };
 
+
+/** One agronomist's row on the stock screen. */
+export type StockSummaryRow = {
+  _id: string;
+  name: string;
+  mobile: string;
+  role: string;
+  region: string;
+  /** Their first stock entry; sales before it are not counted. Null = not started. */
+  since: string | null;
+  /** Products (per pack size) they hold any of. */
+  products: number;
+  units: number;
+  /** In-hand units at today's catalog price, in ₹. */
+  value: number;
+  /** Lines below zero: sold more than they were given. */
+  short: number;
+};
+
+export type StockEntryType = "opening" | "issue" | "return" | "adjust";
+
+/** One product and size a staff member holds, and how the figure is made up. */
+export type StockLine = {
+  product: string;
+  variant: string | null;
+  name: string;
+  unit: string;
+  opening: number;
+  issued: number;
+  returned: number;
+  adjusted: number;
+  sold: number;
+  inHand: number;
+  price: number;
+  value: number;
+};
+
+export type StockMovement = {
+  _id: string;
+  type: StockEntryType;
+  product: string;
+  variant: string | null;
+  productName: string;
+  unit: string;
+  qty: number;
+  note: string;
+  by: string;
+  at: string;
+};
+
+export type StaffStock = {
+  staff: { _id: string; name: string; mobile: string; role: string };
+  since: string | null;
+  lines: StockLine[];
+  history: StockMovement[];
+};
+
 export const api = {
   // Admin auth. There is no register/sign-up: admins are created from the Account tab.
   login: (mobile: string, password: string) =>
@@ -1231,4 +1288,14 @@ export const api = {
     form<CatalogCrop>(`/api/crop-catalog/${id}`, "PUT", data),
   deleteCropCatalog: (id: string) =>
     json<{ message: string }>(`/api/crop-catalog/${id}`, { method: "DELETE" }),
+
+  stockSummary: () => json<StockSummaryRow[]>("/api/stock"),
+  staffStock: (id: string) => json<StaffStock>(`/api/stock/staff/${id}`),
+  addStock: (body: {
+    staff: string;
+    type: StockEntryType;
+    items: { product: string; variant?: string | null; qty: number }[];
+    note?: string;
+    at?: string;
+  }) => json<StockMovement[]>("/api/stock/movements", { method: "POST", body: JSON.stringify(body) }),
 };
