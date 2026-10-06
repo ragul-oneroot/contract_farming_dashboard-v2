@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
-  Download,
   PieChart,
   RefreshCw,
   Repeat,
@@ -17,6 +16,9 @@ import { api, Person, ProductSale, saleBuyer, Visit } from "../lib/api";
 import { AcresCovered } from "../components/acres-covered";
 import { isLateEntry, lateEntryDays, LateEntryTag } from "../components/late-entry-tag";
 import { DonutChart, money, RankedBars, shortMoney, topSlices, TrendChart } from "../components/charts";
+import { AgronomistMultiSelect } from "../components/agronomist-multi-select";
+import { ExcelExport } from "../components/excel-export";
+import { SALE_COLUMNS, saleLines } from "../components/sale-export";
 
 /**
  * A period ending today, as the two yyyy-mm-dd ends of a closed window.
@@ -67,7 +69,9 @@ export default function AnalysisPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Server-side: these decide which sales are fetched at all.
-  const [who, setWho] = useState("");
+  /** Agronomists picked; none picked means everyone. */
+  const [who, setWho] = useState<string[]>([]);
+  const whoKey = who.join(",");
   const [from, setFrom] = useState(daysBack(29).from);
   const [to, setTo] = useState(daysBack(0).to);
   // Client-side: these narrow what has already arrived.
@@ -99,7 +103,7 @@ export default function AnalysisPage() {
          */
         const [s, a, f, v] = await Promise.all([
           api.listProductSales({
-            agronomistId: who || undefined,
+            agronomistId: whoKey || undefined,
             from: from || undefined,
             to: to || undefined,
             withAcres: true,
@@ -125,7 +129,7 @@ export default function AnalysisPage() {
         if (!stale?.()) setLoading(false);
       }
     },
-    [who, from, to]
+    [whoKey, from, to]
   );
 
   useEffect(() => {
@@ -416,88 +420,8 @@ export default function AnalysisPage() {
    * The sale's own totals repeat down its lines, which is what lets a reader sum
    * either column without double-counting the other.
    */
-  const downloadCsv = () => {
-    const head = [
-      "Date",
-      "Time",
-      "Buyer",
-      "Buyer type",
-      "Mobile",
-      "Village",
-      "Taluk",
-      "District",
-      "Buyer acres",
-      // Two columns rather than one flag: the office reconciles against dates,
-      // and "when was this typed" answers more than a yes/no ever could.
-      "Recorded on",
-      "Entered late",
-      "Agronomist",
-      "Crop",
-      "Product",
-      "Qty",
-      "Rate",
-      "Line discount",
-      "Line total",
-      "Sale discount",
-      "Sale total",
-      "Notes",
-    ];
-    // Quote everything and double any quote inside: a farmer named O"Brien, or
-    // a note with a comma, would otherwise shift every later column.
-    const cell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
 
-    const lines = [head.map(cell).join(",")];
-    rows.forEach((s) => {
-      const b = saleBuyer(s);
-      const a = s.farmer?.farmAddress ?? s.fpo?.address;
-      const d = new Date(s.soldAt);
-      s.items.forEach((i) => {
-        lines.push(
-          [
-            iso(d),
-            d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
-            b.name,
-            b.kind === "fpo" ? "FPO" : "Farmer",
-            b.mobile,
-            a?.village ?? "",
-            a?.taluk ?? "",
-            a?.district ?? "",
-            // Blank, not 0, on an FPO row: a spreadsheet summing this column
-            // should not be told an FPO farms nought acres.
-            typeof s.farmerAcres === "number" ? s.farmerAcres : "",
-            s.createdAt ? new Date(s.createdAt).toLocaleString() : "",
-            isLateEntry(s) ? "yes" : "",
-            s.agronomist?.name || s.agronomistName || "",
-            s.cropName || "",
-            i.name,
-            i.qty,
-            i.unitPrice,
-            i.discountAmount ?? 0,
-            i.lineTotal ?? 0,
-            s.discountAmount ?? 0,
-            s.total ?? 0,
-            s.notes || "",
-          ]
-            .map(cell)
-            .join(",")
-        );
-      });
-    });
-
-    // A BOM, so Excel opens it as UTF-8 and rupee signs and Kannada names are
-    // not mangled into Latin-1 noise.
-    const blob = new Blob(["﻿" + lines.join("\r\n")], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `sales-${from || "all"}-to-${to || "today"}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const filtered = !!(who || product || region || buyerKind || query);
+  const filtered = !!(who.length || product || region || buyerKind || query);
 
   return (
     <div className="space-y-4">
@@ -527,13 +451,7 @@ export default function AnalysisPage() {
               className="w-full rounded-lg border border-zinc-300 bg-transparent py-2 pl-9 pr-3 text-sm dark:border-zinc-700"
             />
           </div>
-          <button
-            onClick={downloadCsv}
-            disabled={rows.length === 0}
-            className="flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            <Download size={15} /> Download CSV
-          </button>
+          <ExcelExport id="sales-analysis" fileName="sales" columns={SALE_COLUMNS} rows={() => saleLines(rows)} />
         </div>
 
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
@@ -549,18 +467,7 @@ export default function AnalysisPage() {
           </select>
 
           <span className="text-zinc-500">Agronomist</span>
-          <select
-            value={who}
-            onChange={(e) => setWho(e.target.value)}
-            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
-          >
-            <option value="">All</option>
-            {agronomists.map((a) => (
-              <option key={a._id} value={a._id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+          <AgronomistMultiSelect agronomists={agronomists} value={who} onChange={setWho} allLabel="All" />
 
           <span className="text-zinc-500">Product</span>
           <select
@@ -607,7 +514,7 @@ export default function AnalysisPage() {
           {filtered && (
             <button
               onClick={() => {
-                setWho("");
+                setWho([]);
                 setProduct("");
                 setRegion("");
                 setBuyerKind("");

@@ -4,9 +4,11 @@ import { Sprout } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { api, type Person } from "../lib/api";
+import { AgronomistMultiSelect } from "./agronomist-multi-select";
 
 /**
- * How much land one agronomist covers.
+ * How much land one or more agronomists cover - several picked are added
+ * together, each farmer counted once.
  *
  * A lookup rather than a filter: it answers a question about a person, and
  * narrowing whatever table or chart sits beside it would throw away what the
@@ -17,7 +19,9 @@ import { api, type Person } from "../lib/api";
  * that agronomist onboarded, counted once each, wherever it is asked.
  */
 export function AcresCovered({ agronomists }: { agronomists: Person[] }) {
-  const [who, setWho] = useState("");
+  /** The agronomists picked; empty shows nothing. */
+  const [picked, setPicked] = useState<string[]>([]);
+  const who = picked.join(",");
   /**
    * null while the answer is still coming, "error" when the request failed, and
    * "stale-server" when the backend answered without the figure at all.
@@ -61,24 +65,17 @@ export function AcresCovered({ agronomists }: { agronomists: Person[] }) {
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <Sprout size={15} className="text-green-600" />
       <span className="text-zinc-500">Acres covered</span>
-      <select
-        value={who}
-        onChange={(e) => {
-          setWho(e.target.value);
+      <AgronomistMultiSelect
+        agronomists={agronomists}
+        value={picked}
+        onChange={(ids) => {
+          setPicked(ids);
           // Cleared here rather than in the effect: the old number must not sit
           // under a newly chosen name for even a moment.
           setCoverage(null);
         }}
-        className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
-      >
-        <option value="">Choose an agronomist…</option>
-        {agronomists.map((a) => (
-          <option key={a._id} value={a._id}>
-            {a.name}
-            {a.mobile ? ` · ${a.mobile}` : ""}
-          </option>
-        ))}
-      </select>
+        allLabel="Choose agronomists…"
+      />
 
       {who && coverage === null && <span className="text-xs text-zinc-400">counting…</span>}
 
@@ -96,7 +93,8 @@ export function AcresCovered({ agronomists }: { agronomists: Person[] }) {
         <span className="flex items-center gap-2 rounded-lg bg-green-50 px-3 py-1.5 text-sm font-semibold text-green-800 dark:bg-green-950/40 dark:text-green-300">
           {coverage.acres.toLocaleString("en-IN")} acres
           <span className="text-xs font-normal text-green-700/70 dark:text-green-400/70">
-            across {coverage.farmers} farmer{coverage.farmers === 1 ? "" : "s"} they onboarded
+            across {coverage.farmers} farmer{coverage.farmers === 1 ? "" : "s"}{" "}
+            {picked.length > 1 ? `these ${picked.length} agronomists` : "they"} onboarded
           </span>
         </span>
       )}
