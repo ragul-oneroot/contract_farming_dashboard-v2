@@ -6,6 +6,8 @@ import { CalendarClock, CalendarDays, ExternalLink, MapPin, Search } from "lucid
 import { api, Person, Visit } from "../lib/api";
 import { PhotoThumb } from "../components/lightbox";
 import { NextVisitDialog } from "../components/next-visit-dialog";
+import { AgronomistMultiSelect } from "../components/agronomist-multi-select";
+import { ExcelExport, type ExportColumn } from "../components/excel-export";
 
 function fmtTime(s: string) {
   return new Date(s).toLocaleString(undefined, {
@@ -45,6 +47,26 @@ function owedOf(v: Visit): Owed {
   return new Date(due).getTime() < startOfToday() ? "overdue" : f?.nextFollowUpAt ? "promised" : "assigned";
 }
 
+const when = (s?: string | null) => (s ? new Date(s) : null);
+
+/** Every column a visits download can carry; the office ticks which. */
+const VISIT_COLUMNS: ExportColumn<Visit>[] = [
+  { key: "visitedAt", label: "Visited at", value: (v) => when(v.visitedAt) },
+  { key: "agronomist", label: "Agronomist", value: (v) => v.agronomist?.name },
+  { key: "agronomistMobile", label: "Agronomist mobile", value: (v) => v.agronomist?.mobile, checked: false },
+  { key: "farmer", label: "Farmer", value: (v) => v.farmer?.name || v.farmerName },
+  { key: "farmerMobile", label: "Farmer mobile", value: (v) => v.farmer?.mobile },
+  { key: "notes", label: "Notes", value: (v) => v.notes },
+  { key: "followUpNote", label: "Follow-up note", value: (v) => v.followUpNote },
+  { key: "nextFollowUpAt", label: "Next follow-up", value: (v) => when(v.nextFollowUpAt) },
+  { key: "status", label: "Next visit status", value: (v) => OWED[owedOf(v)].label },
+  { key: "lastVisitedAt", label: "Farmer last visited", value: (v) => when(v.farmer?.lastVisitedAt), checked: false },
+  { key: "latitude", label: "Latitude", value: (v) => v.location?.latitude, checked: false },
+  { key: "longitude", label: "Longitude", value: (v) => v.location?.longitude, checked: false },
+  { key: "farmPhoto", label: "Farm photo link", value: (v) => v.farmPhotoUrl, checked: false },
+  { key: "farmerPhoto", label: "Farmer photo link", value: (v) => v.farmerPhotoUrl, checked: false },
+];
+
 const OWED: Record<Owed, { label: string; className: string }> = {
   promised: {
     label: "Agent promised",
@@ -75,7 +97,9 @@ export default function VisitsPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Server-side: these change which visits are fetched at all.
-  const [who, setWho] = useState("");
+  /** Agronomists picked; none picked means everyone. */
+  const [who, setWho] = useState<string[]>([]);
+  const whoKey = who.join(",");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   // Client-side: these narrow what has already arrived.
@@ -91,7 +115,7 @@ export default function VisitsPage() {
       setLoading(true);
       try {
         const [v, a] = await Promise.all([
-          api.listVisits({ agronomist: who || undefined, from: from || undefined, to: to || undefined }),
+          api.listVisits({ agronomist: whoKey || undefined, from: from || undefined, to: to || undefined }),
           api.listAgronomists().catch(() => [] as Person[]),
         ]);
         if (cancelled) return;
@@ -108,7 +132,7 @@ export default function VisitsPage() {
     return () => {
       cancelled = true;
     };
-  }, [who, from, to]);
+  }, [whoKey, from, to]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -141,7 +165,7 @@ export default function VisitsPage() {
     };
   }, [visits]);
 
-  const filtered = !!(who || from || to || owed || query);
+  const filtered = !!(who.length || from || to || owed || query);
 
   return (
     <div className="space-y-4">
@@ -164,18 +188,7 @@ export default function VisitsPage() {
               className="w-48 bg-transparent py-1.5 outline-none"
             />
           </div>
-          <select
-            value={who}
-            onChange={(e) => setWho(e.target.value)}
-            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1.5 dark:border-zinc-700"
-          >
-            <option value="">All agronomists</option>
-            {agronomists.map((a) => (
-              <option key={a._id} value={a._id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+          <AgronomistMultiSelect agronomists={agronomists} value={who} onChange={setWho} />
           <CalendarDays size={15} className="text-zinc-400" />
           <input
             type="date"
@@ -193,7 +206,7 @@ export default function VisitsPage() {
           {filtered && (
             <button
               onClick={() => {
-                setWho("");
+                setWho([]);
                 setFrom("");
                 setTo("");
                 setOwed("");
@@ -204,6 +217,7 @@ export default function VisitsPage() {
               Clear filters
             </button>
           )}
+          <ExcelExport id="visits" fileName="farm-visits" columns={VISIT_COLUMNS} rows={() => rows} />
         </div>
       </div>
 

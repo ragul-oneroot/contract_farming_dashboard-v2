@@ -10,6 +10,34 @@ import { AcresCovered } from "./acres-covered";
 import { RegionsDialog } from "./regions-dialog";
 import { AudioPlayer } from "./audio-player";
 import { EMPTY_LOCATION, FarmLocation, FarmLocationPicker } from "./farm-location-picker";
+import { AgronomistMultiSelect } from "./agronomist-multi-select";
+import { ExcelExport, type ExportColumn } from "./excel-export";
+
+const when = (s?: string | null) => (s ? new Date(s) : null);
+
+/** Every column a farmers download can carry; the office ticks which. */
+const FARMER_COLUMNS: ExportColumn<Person>[] = [
+  { key: "name", label: "Name", value: (p) => p.name },
+  { key: "mobile", label: "Mobile", value: (p) => p.mobile },
+  { key: "createdAt", label: "Registered at", value: (p) => when(p.createdAt) },
+  { key: "state", label: "State", value: (p) => p.farmAddress?.state, checked: false },
+  { key: "district", label: "District", value: (p) => p.farmAddress?.district },
+  { key: "taluk", label: "Taluk", value: (p) => p.farmAddress?.taluk },
+  { key: "village", label: "Village", value: (p) => p.farmAddress?.village },
+  { key: "acres", label: "Acres", value: (p) => p.acres ?? 0 },
+  { key: "crops", label: "Crops", value: (p) => p.cropCount ?? 0, checked: false },
+  { key: "boundary", label: "Farm boundary drawn", value: (p) => ((p.geofenceCount ?? 0) >= 3 ? "Yes" : "No"), checked: false },
+  { key: "onboardedBy", label: "Onboarded by", value: (p) => p.onboardedBy?.name ?? "Added from dashboard" },
+  { key: "onboardedByMobile", label: "Onboarded by mobile", value: (p) => p.onboardedBy?.mobile, checked: false },
+  { key: "agronomist", label: "Assigned agronomist", value: (p) => p.agronomist?.name, checked: false },
+  { key: "fpo", label: "FPO", value: (p) => p.fpo?.name, checked: false },
+  { key: "lastVisitedAt", label: "Last visited", value: (p) => when(p.lastVisitedAt), checked: false },
+  { key: "nextFollowUpAt", label: "Next follow-up", value: (p) => when(p.nextFollowUpAt), checked: false },
+  { key: "followUpNote", label: "Follow-up note", value: (p) => p.followUpNote, checked: false },
+  { key: "latitude", label: "Latitude", value: (p) => p.location?.latitude, checked: false },
+  { key: "longitude", label: "Longitude", value: (p) => p.location?.longitude, checked: false },
+  { key: "photo", label: "Photo link", value: (p) => p.photoUrl, checked: false },
+];
 
 const PAGE_SIZE = 20;
 
@@ -350,6 +378,26 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
           </button>
         )}
         {showDetail && (
+          // Every farmer the filters match, not just this page of twenty.
+          <ExcelExport
+            id="farmers"
+            fileName="farmers"
+            columns={FARMER_COLUMNS}
+            rows={() =>
+              api.listFarmersAll({
+                onboardedBy: onboardedByFilter,
+                search: query,
+                farmingType,
+                district,
+                taluk,
+                village,
+                from,
+                to,
+              })
+            }
+          />
+        )}
+        {showDetail && (
           <button
             onClick={openAdd}
             className="flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
@@ -364,19 +412,15 @@ export function PeopleTable({ role }: { role: "farmer" | "agronomist" }) {
         {showDetail && (
           <>
             <span className="text-zinc-500">Onboarded by</span>
-            <select
-              value={onboardedByFilter}
-              onChange={(e) => applyFilter(setOnboardedByFilter)(e.target.value)}
-              className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
-            >
-              <option value="">All</option>
-              <option value="none">— Added from dashboard —</option>
-              {agronomists.map((a) => (
-                <option key={a._id} value={a._id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+            {/* Several can be picked; sent comma-separated, which the server
+                reads as "any of these". */}
+            <AgronomistMultiSelect
+              agronomists={agronomists}
+              value={onboardedByFilter ? onboardedByFilter.split(",") : []}
+              onChange={(ids) => applyFilter(setOnboardedByFilter)(ids.join(","))}
+              allLabel="All"
+              noneLabel="Added from dashboard"
+            />
           </>
         )}
         {showDetail && (

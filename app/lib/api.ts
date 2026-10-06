@@ -852,6 +852,24 @@ export const api = {
     q.set("limit", String(params.limit ?? 20));
     return json<Paged<Person>>(`/api/users/farmers?${q.toString()}`);
   },
+  /**
+   * Every farmer matching the same filters, not one page - for the Excel
+   * download. Without `page` the server returns the whole list.
+   */
+  listFarmersAll: (params: {
+    onboardedBy?: string;
+    search?: string;
+    farmingType?: string;
+    district?: string;
+    taluk?: string;
+    village?: string;
+    from?: string;
+    to?: string;
+  }) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) q.set(k, v);
+    return json<Person[]>(`/api/users/farmers?${q.toString()}`);
+  },
 
   /**
    * The places farmers actually sit in, for the location dropdowns.

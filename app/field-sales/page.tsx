@@ -15,6 +15,9 @@ import { api, Person, ProductSale, Region, saleBuyer } from "../lib/api";
 import { EditSaleDialog } from "../components/edit-sale-dialog";
 import { isLateEntry, LateEntryNote, LateEntryTag } from "../components/late-entry-tag";
 import { PhotoThumb } from "../components/lightbox";
+import { AgronomistMultiSelect } from "../components/agronomist-multi-select";
+import { ExcelExport } from "../components/excel-export";
+import { SALE_COLUMNS, saleLines } from "../components/sale-export";
 
 /** The day alone — for a sale whose time was never actually observed. */
 function fmtDay(s: string) {
@@ -182,7 +185,9 @@ export default function FieldSalesPage() {
   /** The sale being corrected, if any. */
   const [editing, setEditing] = useState<ProductSale | null>(null);
   const [agronomists, setPersons] = useState<Person[]>([]);
-  const [who, setWho] = useState(""); // "" = everyone
+  /** Agronomists picked; none picked means everyone. */
+  const [who, setWho] = useState<string[]>([]);
+  const whoKey = who.join(",");
   // A closed window, not an open-ended "since": a lone date read as a picker
   // but meant "everything from here onward", with no way to bound the far end.
   const [from, setFrom] = useState("");
@@ -208,7 +213,7 @@ export default function FieldSalesPage() {
     try {
       const [s, a, r] = await Promise.all([
         api.listProductSales({
-          agronomistId: who || undefined,
+          agronomistId: whoKey || undefined,
           from: from || undefined,
           to: to || undefined,
         }),
@@ -224,7 +229,7 @@ export default function FieldSalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [who, from, to]);
+  }, [whoKey, from, to]);
 
   useEffect(() => {
     load();
@@ -380,18 +385,7 @@ export default function FieldSalesPage() {
           </select>
 
           <span className="text-zinc-500">Agronomist</span>
-          <select
-            value={who}
-            onChange={(e) => setWho(e.target.value)}
-            className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
-          >
-            <option value="">All</option>
-            {agronomists.map((a) => (
-              <option key={a._id} value={a._id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+          <AgronomistMultiSelect agronomists={agronomists} value={who} onChange={setWho} allLabel="All" />
 
           <CalendarDays size={15} className="text-zinc-400" />
           <span className="text-zinc-500">Given</span>
@@ -438,10 +432,10 @@ export default function FieldSalesPage() {
             );
           })}
 
-          {(who || from || to || buyerKind || code || query) && (
+          {(who.length || from || to || buyerKind || code || query) && (
             <button
               onClick={() => {
-                setWho("");
+                setWho([]);
                 setFrom("");
                 setTo("");
                 setBuyerKind("");
@@ -453,6 +447,14 @@ export default function FieldSalesPage() {
               Clear filters
             </button>
           )}
+          <div className="ml-auto">
+            <ExcelExport
+              id="field-sales"
+              fileName="field-sales"
+              columns={SALE_COLUMNS}
+              rows={() => saleLines(rows)}
+            />
+          </div>
         </div>
       </div>
 
